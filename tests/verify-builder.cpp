@@ -5,6 +5,9 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QGraphicsView>
+#include <QGraphicsItem>
+#include <QGraphicsScene>
+#include <QGraphicsPathItem>
 #include <QTableWidget>
 #include <QLabel>
 #include <QDoubleSpinBox>
@@ -76,6 +79,76 @@ int main(int argc,char** argv){
             ok=ok&&builder.draft().value("nodes").toArray().size()==2;
             if(addInput)QTest::mouseClick(addInput,Qt::LeftButton);
             ok=ok&&builder.draft().value("nodes").toArray()[1].toObject().value("inputs").toArray().size()==2;
+            // Real viewport gestures: move a node, cable from output to input,
+            // select a cable and delete, and reject a cycle.
+            auto item=[&](const QString& role,int id,int row=-1)->QGraphicsItem*{
+                for(auto* i:graph->scene()->items())
+                    if(i->data(1).toString()==role&&i->data(0).toInt()==id&&(row<0||i->data(2).toInt()==row))return i;
+                return nullptr;
+            };
+            auto center=[&](QGraphicsItem* i){return graph->mapFromScene(i->sceneBoundingRect().center());};
+            auto drag=[&](QPoint from,QPoint to){
+                QTest::mousePress(graph->viewport(),Qt::LeftButton,Qt::NoModifier,from);
+                QTest::mouseMove(graph->viewport(),to,20);
+                QTest::mouseRelease(graph->viewport(),Qt::LeftButton,Qt::NoModifier,to);
+                QApplication::processEvents();
+            };
+            auto* movable=item("node",0);
+            auto* inputPort=item("out",-1);auto* toPort=item("in",1);
+            bool canvas=movable&&inputPort&&toPort;
+            if(canvas){
+                auto before=builder.draft();auto pos=movable->pos();auto start=center(movable);
+                drag(start,start+QPoint(0,40));
+                movable=item("node",0);
+                canvas=movable&&movable->pos()!=pos&&builder.draft()==before;
+                std::printf("CANVAS_MOVE=%d\n",canvas);
+                auto* fit=builder.findChild<QPushButton*>("fitCanvas");if(fit)QTest::mouseClick(fit,Qt::LeftButton);
+                auto* path=item("cable",1,1);
+                if(path){
+                    auto* cable=static_cast<QGraphicsPathItem*>(path);
+                    auto point=graph->mapFromScene(cable->path().pointAtPercent(.5));
+                    QTest::mouseClick(graph->viewport(),Qt::LeftButton,Qt::NoModifier,point);
+                    std::printf("CANVAS_SELECTED=%lld point=%d,%d\n",static_cast<long long>(graph->scene()->selectedItems().size()),point.x(),point.y());
+                    QTest::keyClick(graph,Qt::Key_Delete);QApplication::processEvents();
+                }else canvas=false;
+                canvas=canvas&&builder.draft().value("nodes").toArray()[1].toObject().value("inputs").toArray().size()==1;
+                std::printf("CANVAS_DISCONNECT=%d\n",canvas);
+                auto* out=item("out",-1);auto* in=item("in",1);
+                if(out&&in)drag(center(out),center(in));else canvas=false;
+                canvas=canvas&&builder.draft().value("nodes").toArray()[1].toObject().value("inputs").toArray().size()==2;
+                std::printf("CANVAS_CONNECT=%d\n",canvas);
+                auto valid=builder.draft();
+                out=item("out",1);in=item("in",0);
+                if(out&&in)drag(center(out),center(in));else canvas=false;
+                canvas=canvas&&builder.draft()==valid;
+                out=item("out",-1);in=item("in",1);
+                if(out&&in)drag(center(out),center(in));else canvas=false;
+                canvas=canvas&&builder.draft()==valid; // duplicate rejected
+                // Reroute output via cable, then restore. A disconnected node
+                // is legal as a draft but production validation must reject it.
+                auto* terminal=item("in",-2);out=item("out",0);
+                if(terminal&&out)drag(center(out),center(terminal));else canvas=false;
+                canvas=canvas&&builder.draft().value("output").toInt()==0;
+                auto* current=obs_source_get_settings(filter);
+                auto unchanged=std::string(obs_data_get_string(current,"graph_json"));obs_data_release(current);
+                QTest::mouseClick(apply,Qt::LeftButton);
+                current=obs_source_get_settings(filter);
+                canvas=canvas&&unchanged==obs_data_get_string(current,"graph_json");obs_data_release(current);
+                terminal=item("in",-2);out=item("out",1);
+                if(terminal&&out)drag(center(out),center(terminal));else canvas=false;
+                canvas=canvas&&builder.draft()==valid;
+                // The only input cable on node 0 cannot be removed accidentally.
+                auto* last=item("cable",0,0);
+                if(last){
+                    auto point=graph->mapFromScene(static_cast<QGraphicsPathItem*>(last)->path().pointAtPercent(.5));
+                    QTest::mouseClick(graph->viewport(),Qt::LeftButton,Qt::NoModifier,point);
+                    QTest::keyClick(graph,Qt::Key_Delete);
+                    canvas=canvas&&builder.draft()==valid;
+                }else canvas=false;
+                auto* node=item("node",1);
+                if(node)QTest::mouseClick(graph->viewport(),Qt::LeftButton,Qt::NoModifier,center(node));
+            }
+            std::printf("BUILDER_CANVAS_PASS=%d\n",canvas);ok=ok&&canvas;
             auto* gain=builder.findChild<QDoubleSpinBox*>("param_gain_db");ok=ok&&gain;
             if(gain)gain->setValue(-6);
             QTest::mouseClick(apply,Qt::LeftButton);

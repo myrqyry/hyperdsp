@@ -47,6 +47,8 @@ Standalone conventional audio effects and hosting for OBS, with optional inputs 
 
 - Optional native Qt Effect Builder dock: visual graph, searchable native/LADSPA library, generated parameter inspector, weighted input editing, JSON import/export and validated explicit apply. Widget and isolated desktop registration verified.
 
+- Direct canvas manipulation: draggable nodes, port-to-port cables, selectable/disconnectable edges, cycle/duplicate/limit checks, output rerouting, zoom and layout reset; Qt viewport gestures verified against the real graph filter.
+
 ## Next layers
 
 - Unified discoverable effect library: favorites, native/installed external/community definitions, backend compatibility, descriptions, safe explicit acquisition and reusable presets. Reset/import/export and a compact native frequency-response view.

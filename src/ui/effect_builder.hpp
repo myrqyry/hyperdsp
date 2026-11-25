@@ -4,6 +4,8 @@
 #include <QJsonArray>
 #include <QPointer>
 #include <vector>
+#include <map>
+#include <QPointF>
 class QComboBox;class QLineEdit;class QListWidget;class QGraphicsView;class QGraphicsScene;class QLabel;class QFormLayout;class QTableWidget;class QScrollArea;
 namespace hyperdsp {
 class EffectBuilder final:public QWidget {
@@ -16,6 +18,7 @@ private:
     QJsonArray inventory_;
     QJsonArray inventory()const;
     int selected_=-1;
+    std::map<int,QPointF> positions_;
     QComboBox *target_,*output_;
     QLineEdit* search_;
     QListWidget* library_;
@@ -27,6 +30,12 @@ private:
     void refreshTargets();
     void refreshLibrary();
     void redraw();
+    void redrawWires();
+    void fitCanvas();
+    void connectPorts(int from,int to);
+    void disconnectCable(int to,int row);
+    bool acceptsEdge(int from,int to,int ignoreRow=-1)const;
+    void updateNodePosition(int id,QPointF pos);
     void inspect();
     void addNode();
     void addEdge();
