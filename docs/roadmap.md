@@ -19,12 +19,14 @@ Standalone conventional audio effects and hosting for OBS, with optional inputs 
 
 - Native compressor, downward expander, gate and sample-peak limiter with four shared modulation routes.
 
+- Native tanh saturation, cubic soft clip, hard clip, wavefolding and bitcrusher/sample hold; optional 2×/4× filtered oversampling and aligned parallel mix.
+
 ## Next layers
 
 - Favorites, reusable presets, reset/import/export, better effect descriptions and a compact native frequency-response view.
 - Extend the shared modulation matrix with a destination registry, configurable detector bands, additional backends, external signals and native port smoothing.
 - Extend optional interop to more Sight and Sound signals, handedness selection, Sound category picker and full live-producer qualification; retain versioned procedures, stable UUIDs and missing/stale-data fallback. No inference in HyperDSP and no producer calls on the audio callback.
 - Dedicated serial/parallel effect graph and eventual Effect Builder dock, following HyperShader’s existing Shader Builder interaction and recovery patterns. See [Effect Builder direction](effect-builder.md). Latency compensation and alignment; sidechains and appropriate oversampling for nonlinear effects.
-- Native saturation, delay, chorus, flanger, phaser, reverb and additional creative filters/effects: formant resonances, morphing responses, spectral gate; auto-wah can already be configured with the native envelope-controlled filter.
+- Native delay, chorus, flanger, phaser, reverb and additional creative filters/effects: formant resonances, morphing responses, spectral gate; auto-wah can already be configured with the native envelope-controlled filter.
 - Other hosting formats: JSFX (license compatibility review of YSFX), Faust, CLAP, LV2. No unsupported format claims.
 - Finish coordinated Sound Mic DSP ownership migration, isolated coexistence validation, installation and actual OBS UI/audio smoke tests.

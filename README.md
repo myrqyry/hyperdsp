@@ -39,6 +39,14 @@ All four shared modulation routes are available, including optional Sound and Si
 
 Numerical and real libobs tests cover static curves, stereo linkage, soft knee, gate hold/hysteresis, sample ceiling across 44.1/48/96 kHz, nonfinite sample handling, bypass and Sound-driven attenuation using the versioned contract fixture. See [dynamics verification](docs/dynamics.md).
 
+## Native color and digital degradation
+
+Add **HyperDSP Color** for tanh saturation, cubic soft clipping, hard clipping, triangle wavefolding, bitcrushing/sample hold or unprocessed bypass. Drive spans −24 to +36 dB; the signed quantizer provides 2–16 bits and sample hold repeats each quantized value for 1–64 samples. No dithering is applied. Each channel has independent state.
+
+Nonlinear modes offer optional 2× or 4× filtered oversampling using windowed-sinc FIR interpolation and decimation. Both modes delay the signal by 24 base-rate samples; the parallel dry path is aligned internally. This is not OBS-wide latency compensation. Bitcrushing intentionally preserves aliasing and does not oversample. Changing effect type or oversampling resets state rather than crossfading.
+
+Four shared modulation routes control drive, bit depth, sample hold, wet/dry and output amplitude in destination units, including optional Sight and Sound inputs. As with other native effects, the underlying engine is independent of OBS and can be reused in future effect graphs. See [color verification](docs/color.md).
+
 ## LADSPA filter
 
 Add **HyperDSP LADSPA** to an audio source. Search the effect catalog by name, label or maker, narrow by category, and choose an effect from the native OBS properties. Switching catalog effects clears the previous effect's port values so the new effect starts at its own defaults. Manual trusted library path and exact label (for example, `/usr/lib/ladspa/amp.so` and `amp_stereo`) remain available. The filter generates numeric and toggle controls from port metadata. Mono effects use independent instances per OBS audio channel; stereo effects require a stereo OBS layout. Only equal-input/output mono or stereo effects declaring hard-real-time capability are accepted. Unsupported configurations, missing libraries and invalid labels bypass audio.
