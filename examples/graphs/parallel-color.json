@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "nodes": [
+    {
+      "effect": "native:hyperdsp_color_filter:1",
+      "params": {"oversample": 2, "drive": 0},
+      "inputs": [{"source": -1, "weight": 1}]
+    },
+    {
+      "effect": "gain",
+      "inputs": [{"source": 0, "weight": 0.5}, {"source": -1, "weight": 0.5}]
+    }
+  ],
+  "output": 1,
+  "controls": [
+    {
+      "id": "color",
+      "name": "Color",
+      "default": 0.25,
+      "bindings": [
+        {"node": 0, "parameter": "drive", "low": 0, "high": 24},
+        {"node": 1, "parameter": "gain_db", "low": 0, "high": -6}
+      ]
+    }
+  ]
+}

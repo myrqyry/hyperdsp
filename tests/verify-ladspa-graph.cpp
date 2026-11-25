@@ -22,5 +22,17 @@ int main(int argc,char** argv){
     double peak=0;
     for(unsigned i=0;i<6000;++i){l=.4f*std::sin(.071*i);r=-.4f*l;g.process(p,2,1);peak=std::max(peak,double(std::max(std::abs(l),std::abs(r))));}
     ok=ok&&peak<1e-6;
+    GraphSpec macro{{{mono,{},{{-1,1}}},{"gain",{},{{0,1}}}},1};
+    macro.controls={{"level","Level",.5,{{0,"port_0",0,1},{1,"gain_db",-12,0}}}};
+    auto prepared=PreparedGraph::prepare(macro,48000,2,error,allowed);
+    if(!prepared)return 3;
+    l=.4;r=-.16;prepared->process(p,2,1);
+    ok=ok&&std::abs(l-.1002374)<1e-5;
+    ok=ok&&prepared->set_controls({{"level",1}},error);
+    for(unsigned i=0;i<1024;++i){l=.4;r=-.16;prepared->process(p,2,1);}
+    ok=ok&&std::abs(l-.4)<1e-5&&std::abs(r+.16)<1e-5;
+    macro.controls[0].bindings[0].low=-1;
+    ok=ok&&!PreparedGraph::prepare(macro,48000,2,error,allowed);
+    std::printf("LADSPA_MACRO final=%g pass=%d\n",l,ok);
     std::printf("LADSPA_GRAPH cancellation=%g pass=%d error=%s\n",peak,ok,error.c_str());return ok?0:1;
 }

@@ -6,6 +6,8 @@
 #include <util/platform.h>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
+#include <iterator>
 #include <cstring>
 #include <atomic>
 #include <chrono>
@@ -108,6 +110,19 @@ int main(int argc,char**argv){
     obs_data_set_string(settings,"graph_json",R"({"schema":1,"schema":1,"nodes":[],"output":-1})");obs_source_update(filter,settings);auto duplicate=measure();
     obs_data_set_string(settings,"graph_json",R"({"schema":1,"nodes":[42],"output":0})");obs_source_update(filter,settings);auto malformed=measure();
     obs_data_set_string(settings,"graph_json",R"({"schema":1,"nodes":[],"output":-1})");obs_source_update(filter,settings);auto bypass=measure();
+    const char* macro=R"({"schema":1,"nodes":[{"effect":"gain","inputs":[{"source":-1,"weight":1}]},{"effect":"gain","inputs":[{"source":0,"weight":1}]}],"output":1,"controls":[{"id":"level","name":"Level","default":0.5,"bindings":[{"node":0,"parameter":"gain_db","low":-12,"high":0},{"node":1,"parameter":"gain_db","low":-12,"high":0}]}]})";
+    obs_data_set_string(settings,"graph_json",macro);obs_source_update(filter,settings);auto macro_default=measure();
+    props=obs_source_properties(filter);
+    auto* slider=props?obs_properties_get(props,"graph_control_level"):nullptr;
+    bool macro_ok=slider&&obs_property_get_type(slider)==OBS_PROPERTY_FLOAT&&
+        obs_property_float_min(slider)==0&&obs_property_float_max(slider)==1;
+    if(props)obs_properties_destroy(props);
+    obs_data_set_double(settings,"graph_control_level",1);obs_source_update(filter,settings);auto macro_high=measure();
+    obs_data_set_double(settings,"graph_control_level",0);obs_source_update(filter,settings);auto macro_low=measure();
+    obs_data_set_double(settings,"graph_control_level",2);obs_source_update(filter,settings);auto macro_bad=measure();
+    macro_ok=macro_ok&&std::abs(macro_default[0]-.0710469)<.002&&std::abs(macro_high[0]-.282843)<.002&&
+        std::abs(macro_low[0]-.0178462)<.002&&std::abs(macro_bad[0]-macro_low[0])<.002;
+    std::printf("GRAPH_MACRO_OBS default=%g high=%g low=%g invalid_retained=%g pass=%d\n",macro_default[0],macro_high[0],macro_low[0],macro_bad[0],macro_ok);
     bool external_ok=true;
     if(argc==4){
         const std::string id=std::string("ladspa:")+argv[3]+"\tamp_mono";
@@ -125,7 +140,19 @@ int main(int argc,char**argv){
             std::abs(retained[0]-external[0])<.002&&std::abs(rejected[0]-external[0])<.002;
         std::printf("LADSPA_GRAPH_OBS serial=%g right=%g unscanned_retained=%g invalid_retained=%g pass=%d\n",external[0],external[1],retained[0],rejected[0],external_ok);
     }
-    bool ok=external_ok&&mixed_ok&&controls&&std::abs(a[0]-.071046)<.002&&std::abs(a[1]/a[0]-.4)<.001&&b[0]<1e-5&&c[0]<1e-5&&d[0]<1e-5&&duplicate[0]<1e-5&&malformed[0]<1e-5&&std::abs(bypass[0]-.282843)<.002;
+    bool presets_ok=true;
+    for(auto file:{"parallel-color.json","vowel-space.json"}){
+        std::ifstream input(std::string(argv[2])+"/examples/graphs/"+file);
+        std::string json((std::istreambuf_iterator<char>(input)),{});
+        if(json.empty()){presets_ok=false;continue;}
+        obs_data_set_string(settings,"graph_json",json.c_str());obs_source_update(filter,settings);
+        props=obs_source_properties(filter);
+        const char* key=std::string_view(file)=="parallel-color.json"?"graph_control_color":"graph_control_vowel";
+        presets_ok=presets_ok&&props&&obs_properties_get(props,key);
+        if(props)obs_properties_destroy(props);
+        auto result=measure();presets_ok=presets_ok&&std::isfinite(result[0])&&result[0]>.001;
+    }
+    bool ok=presets_ok&&macro_ok&&external_ok&&mixed_ok&&controls&&std::abs(a[0]-.071046)<.002&&std::abs(a[1]/a[0]-.4)<.001&&b[0]<1e-5&&c[0]<1e-5&&d[0]<1e-5&&duplicate[0]<1e-5&&malformed[0]<1e-5&&std::abs(bypass[0]-.282843)<.002;
     std::printf("GRAPH_OBS serial=%g parallel=%g invalid=%g invalid_param=%g bypass=%g pass=%d\n",a[0],b[0],c[0],d[0],bypass[0],ok);
     obs_set_output_source(1,nullptr);obs_source_dec_active(source);obs_source_filter_remove(source,filter);
     obs_source_release(filter);obs_source_release(source);obs_data_release(settings);obs_shutdown();return ok?0:1;

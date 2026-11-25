@@ -39,6 +39,8 @@ Standalone conventional audio effects and hosting for OBS, with optional inputs 
 
 - Shared LADSPA host engine for standalone and graph nodes; scanned input-port metadata and rate-aware CLI export, explicit local catalog admission, live parameter validation and unknown external latency disclosure.
 
+- Author-defined graph macro controls, bounded validated multi-parameter mappings, in-place engine updates preserving DSP state, generated OBS sliders and two tested reusable JSON examples.
+
 ## Next layers
 
 - Unified discoverable effect library: favorites, native/installed external/community definitions, backend compatibility, descriptions, safe explicit acquisition and reusable presets. Reset/import/export and a compact native frequency-response view.

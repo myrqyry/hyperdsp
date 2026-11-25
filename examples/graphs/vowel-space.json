@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "nodes": [
+    {"effect": "native:hyperdsp_formant_filter:1", "params": {"from": 0, "to": 2}, "inputs": [{"source": -1, "weight": 1}]},
+    {"effect": "native:hyperdsp_space_filter:2", "params": {"decay": 1.5}, "inputs": [{"source": 0, "weight": 1}]}
+  ],
+  "output": 1,
+  "controls": [
+    {"id": "vowel", "name": "Vowel", "default": 0, "bindings": [{"node": 0, "parameter": "morph", "low": 0, "high": 1}]},
+    {"id": "space", "name": "Space", "default": 0.25, "bindings": [
+      {"node": 1, "parameter": "mix", "low": 0, "high": 0.8},
+      {"node": 1, "parameter": "decay", "low": 0.2, "high": 4}
+    ]}
+  ]
+}
