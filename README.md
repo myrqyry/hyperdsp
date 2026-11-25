@@ -61,11 +61,13 @@ Both modes support the four shared reactive routes, input/output gain and wet/dr
 
 ## Native spectral effects
 
-Add **HyperDSP Spectral** for frequency-bin gating, phase-advancing spectral freeze, and temporal spectral smearing. The shared FFT engine uses 1024-sample periodic Hann analysis/synthesis windows with 75% overlap and normalized overlap-add. Active modes have 1024 samples of latency (about 21.33 ms at 48 kHz), including the internally aligned dry branch. Unprocessed bypass is undelayed; OBS-wide compensation is not implemented.
+Add **HyperDSP Spectral** for frequency-bin gating, phase-advancing spectral freeze, temporal spectral smearing, pitch shifting and frequency shifting. The shared FFT engine uses 1024-sample periodic Hann analysis/synthesis windows with 75% overlap and normalized overlap-add. Active modes have 1024 samples of latency (about 21.33 ms at 48 kHz), including the internally aligned dry branch. Unprocessed bypass is undelayed; OBS-wide compensation is not implemented.
 
 The gate attenuates bins below a peak-amplitude threshold calibrated for bin-centered sine waves, with adjustable attenuation and opening/closing time constants. It is not a learned noise suppressor or adaptive noise profile. Freeze captures the next analysis frame when hold crosses 0.5, preserving magnitudes and measured inter-frame phase advances until release. Smear averages spectral magnitudes over time, using live phase while a bin is significant and continuing its last estimated phase advance when quiet. It creates spectral trails, not an ordinary echo. Stereo channels have independent spectral state.
 
-Four reactive routes target threshold, attenuation, freeze hold, spectral memory time, mix and output amplitude. Spectral parameters are sampled at analysis hops; the shared mixer runs per sample. Optional Sound and Sight inputs remain supported. Mode changes reset spectral history; no crossfade or tail preservation. See [spectral verification](docs/spectral-effects.md).
+Pitch shift (±24 semitones) multiplies partial frequencies; frequency shift (±5000 Hz) adds a fixed offset. Both use peak-region phase locking and estimated inter-frame frequency rather than simple FFT-bin relabeling. Output duration and analysis hop remain unchanged, and components whose shifted peak is outside the positive-frequency range are discarded. At zero shift the original spectrum is reconstructed. Nonzero shifts can change partial amplitudes and introduce artifacts on transients and complex signals; no formant preservation or adaptive analysis resolution yet.
+
+Four reactive routes target threshold, attenuation, freeze hold, spectral memory time, mix, output amplitude, pitch and frequency shift. Spectral parameters are sampled at analysis hops; the shared mixer runs per sample. Optional Sound and Sight inputs remain supported. Mode changes reset spectral history; no crossfade or tail preservation. See [spectral verification](docs/spectral-effects.md).
 
 ## LADSPA filter
 

@@ -35,6 +35,24 @@ static void capture(void* param, obs_source_t*, const struct audio_data* data, b
     add(s.sum_l, sl); add(s.sum_r, sr);
     s.samples += data->frames;
 }
+struct FrequencyStats{
+    double hz;
+    std::atomic<uint64_t> samples{0};
+    std::atomic<double> re{0},im{0},original_re{0},original_im{0};
+};
+static void capture_frequency(void* param,obs_source_t*,const struct audio_data* data,bool){
+    auto& s=*static_cast<FrequencyStats*>(param);
+    auto* l=reinterpret_cast<float*>(data->data[0]);if(!l)return;
+    auto start=s.samples.fetch_add(data->frames);
+    double re=0,im=0,ore=0,oim=0;
+    for(unsigned i=0;i<data->frames;++i){
+        const auto a=6.283185307179586*s.hz*(start+i)/48000.;
+        const auto b=6.283185307179586*1500*(start+i)/48000.;
+        re+=l[i]*std::cos(a);im+=l[i]*std::sin(a);
+        ore+=l[i]*std::cos(b);oim+=l[i]*std::sin(b);
+    }
+    add(s.re,re);add(s.im,im);add(s.original_re,ore);add(s.original_im,oim);
+}
 static const char* fixture_name(void*) { return "Verification stereo generator"; }
 static void* fixture_create(obs_data_t*,obs_source_t*) { return reinterpret_cast<void*>(1); }
 static void fixture_destroy(void*) {}
@@ -84,7 +102,7 @@ int main(int argc,char**argv){
     auto* filter=obs_source_create("hyperdsp_spectral_filter","spectral",settings,nullptr);
     if(!source||!filter)return 6;
     auto* props=obs_source_properties(filter);
-    bool controls=props&&obs_property_list_item_count(obs_properties_get(props,"mode"))==4&&obs_properties_get(props,"route4_source");
+    bool controls=props&&obs_property_list_item_count(obs_properties_get(props,"mode"))==6&&obs_properties_get(props,"route4_source");
     if(props)obs_properties_destroy(props);
     obs_source_filter_add(source,filter);obs_set_output_source(1,source);
     obs_source_set_audio_mixers(source,1);obs_source_inc_active(source);obs_source_set_audio_active(source,true);
@@ -112,8 +130,31 @@ int main(int argc,char**argv){
     obs_data_set_double(settings,"route1_amount",80);
     obs_data_set_string(settings,"route1_sound_channel",channel.c_str());obs_data_set_string(settings,"route1_sound_category","Speech");
     obs_source_update(filter,settings);auto reactive=measure(1,60);sound_fixture::available=false;auto fallback=measure(1,60);
+    auto frequency=[&](double target){
+        stream(source,60,1500);
+        FrequencyStats stats{target};
+        obs_source_add_audio_capture_callback(source,capture_frequency,&stats);
+        stream(source,50,1500);obs_source_remove_audio_capture_callback(source,capture_frequency,&stats);
+        auto n=std::max<uint64_t>(1,stats.samples.load());
+        return std::array<double,2>{2*std::hypot(stats.re.load(),stats.im.load())/n,
+            2*std::hypot(stats.original_re.load(),stats.original_im.load())/n};
+    };
+    obs_data_set_int(settings,"route1_source",0);
+    obs_data_set_int(settings,"mode",4);obs_data_set_double(settings,"pitch",12);obs_source_update(filter,settings);
+    auto pitch=frequency(3000);
+    obs_data_set_int(settings,"mode",5);obs_data_set_double(settings,"shift_hz",300);obs_source_update(filter,settings);
+    auto shift=frequency(1800);
+    obs_data_set_int(settings,"mode",4);obs_data_set_double(settings,"pitch",0);
+    obs_data_set_int(settings,"route1_source",6);obs_data_set_int(settings,"route1_target",6);
+    obs_data_set_double(settings,"route1_amount",24);
+    sound_fixture::available=true;obs_source_update(filter,settings);auto pitched=frequency(3000);
+    sound_fixture::available=false;auto unpitched=frequency(3000);
     obs_source_filter_remove(source,producer);obs_source_release(producer);
-    bool ok=controls&&std::abs(gated[0]-.000282843)<.00002&&std::abs(reconstructed[0]-.282843)<.002&&
+    bool shift_ok=pitch[0]>.29&&pitch[1]<.01&&shift[0]>.29&&shift[1]<.01&&
+        pitched[0]>.29&&pitched[1]<.01&&unpitched[0]<.01&&std::abs(unpitched[1]-.4)<.003;
+    std::printf("SHIFT_OBS pitch=%g original=%g shift=%g original=%g reactive=%g fallback=%g pass=%d\n",
+        pitch[0],pitch[1],shift[0],shift[1],pitched[0],unpitched[1],shift_ok);
+    bool ok=shift_ok&&controls&&std::abs(gated[0]-.000282843)<.00002&&std::abs(reconstructed[0]-.282843)<.002&&
         std::abs(frozen[0]-.282843)<.003&&std::abs(frozen[1]/frozen[0]-.4)<.003&&released[0]<.00001&&
         smeared[0]>.08&&smeared[0]<.28&&std::abs(bypass[0]-.282843)<.002&&reactive[0]<.001&&
         std::abs(fallback[0]-bypass[0])<.003;
