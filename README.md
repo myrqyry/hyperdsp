@@ -27,7 +27,11 @@ Use `analyseplugin /path/to/plugin.so` to see available labels. Only load truste
 
 ### Mix and gain staging
 
-Each LADSPA filter also exposes input gain and output gain (−24 to +24 dB) and a linear wet/dry blend (0–1, default 1). Input gain precedes both the dry branch and the plugin, and output gain follows the blend. With a valid effect, zero wet still applies both trims; an invalid or unavailable effect instead passes the original audio unchanged. Nonfinite processed samples fall back to dry audio. The mixer is backend-independent code; only LADSPA uses it so far. Live settings changes are block-boundary updates; sample-ramped controls, latency compensation and parallel alignment for delayed effects remain future work.
+Each LADSPA filter also exposes input gain and output gain (−24 to +24 dB) and a linear wet/dry blend (0–1, default 1). Input gain precedes both the dry branch and the plugin, and output gain follows the blend. With a valid effect, zero wet still applies both trims; an invalid or unavailable effect instead passes the original audio unchanged. Nonfinite processed samples fall back to dry audio. The mixer is backend-independent code; only LADSPA uses it so far. Input/output gain and wet/dry changes use a 10 ms linear sample ramp. Native LADSPA port changes remain block-boundary updates. Latency compensation and parallel alignment for delayed effects remain future work.
+
+### Modulation
+
+The LADSPA filter includes a sine LFO (0.05–20 Hz) with adjustable depth and destination: wet/dry or output amplitude (tremolo). Wet/dry modulation adds the bipolar LFO to the base value and clamps to 0–1; output amplitude is multiplied by 1 + depth × sine. Destination/depth changes ramp over 10 ms, and all channels share the same sample-clocked phase. Disabling modulation leaves the unmodulated effect settings intact. The phase freezes when both modulation depths are zero and resets on a new effect instance. This is a reusable deterministic modulation core, not yet a general-purpose routing matrix or a Sight/Sound consumer.
 
 ### Refresh the catalog
 

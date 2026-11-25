@@ -83,7 +83,7 @@ int main(int argc,char**argv) {
     auto* filter=obs_source_create("hyperdsp_ladspa_filter","ladspa",settings,nullptr);
     if(!source||!filter)return 6;
     auto* props=obs_source_properties(filter);
-    bool prop_ok=props && obs_properties_get(props,"port_0") && obs_properties_get(props,"mix") && obs_properties_get(props,"input_db") && obs_properties_get(props,"output_db");
+    bool prop_ok=props && obs_properties_get(props,"port_0") && obs_properties_get(props,"mix") && obs_properties_get(props,"input_db") && obs_properties_get(props,"output_db") && obs_properties_get(props,"lfo_target") && obs_properties_get(props,"lfo_rate") && obs_properties_get(props,"lfo_depth");
     auto* browser=props?obs_properties_get(props,"catalog_effect"):nullptr;
     auto* search=props?obs_properties_get(props,"catalog_search"):nullptr;
     auto* category=props?obs_properties_get(props,"catalog_category"):nullptr;
@@ -150,6 +150,21 @@ int main(int argc,char**argv) {
     obs_data_set_double(settings,"port_0",.5);
     obs_source_update(filter,settings);
     auto louder=measure();
+    // 2 Hz output gain LFO, depth .5: over two periods RMS multiplier sqrt(1+.5^2/2).
+    obs_data_set_int(settings,"lfo_target",2);
+    obs_data_set_double(settings,"lfo_rate",2.);
+    obs_data_set_double(settings,"lfo_depth",.5);
+    obs_source_update(filter,settings);
+    Stats lfo_stats;
+    obs_source_add_audio_capture_callback(source,capture,&lfo_stats);
+    stream(source,100);
+    obs_source_remove_audio_capture_callback(source,capture,&lfo_stats);
+    const double lfo_l=std::sqrt(lfo_stats.sum_l.load()/std::max<uint64_t>(1,lfo_stats.samples.load()));
+    const double lfo_r=std::sqrt(lfo_stats.sum_r.load()/std::max<uint64_t>(1,lfo_stats.samples.load()));
+    const bool lfo_ok=std::abs(lfo_l/louder[0]-std::sqrt(1.125))<.02 &&
+                      std::abs(lfo_r/louder[1]-std::sqrt(1.125))<.02;
+    obs_data_set_int(settings,"lfo_target",0);
+    obs_source_update(filter,settings);
     obs_data_set_double(settings,"mix",.5);
     obs_source_update(filter,settings);
     auto blend=measure();
@@ -178,7 +193,7 @@ int main(int argc,char**argv) {
     obs_source_update(filter,settings);
     auto dry=measure();
     auto near=[](double a,double b){return std::abs(a-b)<.005;};
-    bool pass=prop_ok && browser_ok && near(quiet[0],.4/std::sqrt(2.)*.25) && near(quiet[1],.16/std::sqrt(2.)*.25)
+    bool pass=prop_ok && browser_ok && lfo_ok && near(quiet[0],.4/std::sqrt(2.)*.25) && near(quiet[1],.16/std::sqrt(2.)*.25)
         && near(louder[0],quiet[0]*2) && near(louder[1],quiet[1]*2)
         && near(blend[0],.4/std::sqrt(2.)*.75) && near(blend[1],.16/std::sqrt(2.)*.75)
         && near(bypass[0],.4/std::sqrt(2.)) && near(bypass[1],.16/std::sqrt(2.))
@@ -187,6 +202,7 @@ int main(int argc,char**argv) {
         && near(mono[0],.4/std::sqrt(2.)*.75) && near(mono[1],.16/std::sqrt(2.)*.75)
         && near(unknown[0],.4/std::sqrt(2.)) && near(unknown[1],.16/std::sqrt(2.))
         && near(dry[0],.4/std::sqrt(2.)) && near(dry[1],.16/std::sqrt(2.));
+    std::printf("LFO_OBS rms_ratio=%g,%g pass=%d\n",lfo_l/louder[0],lfo_r/louder[1],lfo_ok);
     std::printf("MIX_OBS blend=%g,%g bypass=%g,%g unity=%g,%g trim=%g,%g\n",blend[0],blend[1],bypass[0],bypass[1],unity[0],unity[1],trim[0],trim[1]);
     std::printf("LADSPA_OBS_ACTUAL quiet=%g,%g louder=%g,%g mono=%g,%g unknown=%g,%g dry=%g,%g controls=%d browser=%d pass=%d\n",
         quiet[0],quiet[1],louder[0],louder[1],mono[0],mono[1],unknown[0],unknown[1],dry[0],dry[1],prop_ok,browser_ok,pass);

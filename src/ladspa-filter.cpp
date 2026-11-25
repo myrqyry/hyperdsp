@@ -1,6 +1,6 @@
 #include <obs-module.h>
 #include "ladspa-catalog.hpp"
-#include "framework/dsp/effect_mix.hpp"
+#include "framework/dsp/modulation.hpp"
 #include <ladspa.h>
 #include <dlfcn.h>
 #include <algorithm>
@@ -61,7 +61,9 @@ struct Instance {
     std::vector<unsigned> in,out;
     std::vector<Control> controls;
     unsigned rate=0, channels=0;
-    hyperdsp::MixSettings mix;
+    hyperdsp::MixModulator modulation;
+    std::array<hyperdsp::MixSettings,block_size> mix_frames{};
+    bool initialized=false;
     std::string path,label;
     ~Instance() {
         if(descriptor)for(auto& v:voices)if(v->handle){
@@ -71,8 +73,13 @@ struct Instance {
         if(library)dlclose(library);
     }
     void parameters(obs_data_t* settings) {
-        mix=hyperdsp::MixSettings::from(obs_data_get_double(settings,"mix"),
+        auto mix=hyperdsp::MixSettings::from(obs_data_get_double(settings,"mix"),
             obs_data_get_double(settings,"input_db"),obs_data_get_double(settings,"output_db"));
+        const auto target=obs_data_get_int(settings,"lfo_target");
+        hyperdsp::LfoSettings lfo{target>=0&&target<=2?int(target):0,
+            obs_data_get_double(settings,"lfo_rate"),obs_data_get_double(settings,"lfo_depth")};
+        if(initialized)modulation.set(mix,lfo);
+        else {modulation.reset(rate,mix,lfo);initialized=true;}
         for(auto& c:controls){
             auto k=key(c.port);
             if(c.toggle)obs_data_set_default_bool(settings,k.c_str(),c.initial!=0);
@@ -134,16 +141,18 @@ struct Instance {
         for(unsigned c=0;c<channels;++c)if(!audio->data[c])return;
         for(unsigned off=0;off<audio->frames;){
             unsigned n=std::min(block_size,audio->frames-off);
+            // Advance once per audio sample, never once per voice/channel.
+            for(unsigned j=0;j<n;++j)mix_frames[j]=modulation.next();
             for(unsigned i=0;i<voices.size();++i){
                 auto& v=*voices[i];
                 for(unsigned c=0;c<in.size();++c){
                     auto* samples=reinterpret_cast<float*>(audio->data[i*in.size()+c])+off;
-                    for(unsigned j=0;j<n;++j)v.input[c][j]=mix.input(samples[j]);
+                    for(unsigned j=0;j<n;++j)v.input[c][j]=mix_frames[j].input(samples[j]);
                 }
                 descriptor->run(v.handle,n);
                 for(unsigned c=0;c<out.size();++c){
                     auto* samples=reinterpret_cast<float*>(audio->data[i*in.size()+c])+off;
-                    for(unsigned j=0;j<n;++j)samples[j]=mix.output(samples[j],mix.input(samples[j]),v.scratch[c][j]);
+                    for(unsigned j=0;j<n;++j)samples[j]=mix_frames[j].output(samples[j],mix_frames[j].input(samples[j]),v.scratch[c][j]);
                 }
             }
             off+=n;
@@ -162,6 +171,9 @@ void defaults(obs_data_t* settings){
     obs_data_set_default_double(settings,"mix",1.);
     obs_data_set_default_double(settings,"input_db",0.);
     obs_data_set_default_double(settings,"output_db",0.);
+    obs_data_set_default_int(settings,"lfo_target",0);
+    obs_data_set_default_double(settings,"lfo_rate",1.);
+    obs_data_set_default_double(settings,"lfo_depth",0.);
 }
 void update(void* ptr,obs_data_t* settings){
     auto* f=static_cast<Filter*>(ptr);if(!f)return;
@@ -266,6 +278,14 @@ obs_properties_t* properties(void* p){
     auto* output=obs_properties_add_float_slider(props,"output_db","Output gain",-24.,24.,.1);
     obs_property_float_set_suffix(input," dB");
     obs_property_float_set_suffix(output," dB");
+    auto* lfo=obs_properties_add_list(props,"lfo_target","LFO target",OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_INT);
+    obs_property_list_add_int(lfo,"Off",0);
+    obs_property_list_add_int(lfo,"Wet / dry",1);
+    obs_property_list_add_int(lfo,"Output amplitude (tremolo)",2);
+    auto* rate=obs_properties_add_float_slider(props,"lfo_rate","LFO rate",.05,20.,.05);
+    obs_property_float_set_suffix(rate," Hz");
+    auto* depth=obs_properties_add_float_slider(props,"lfo_depth","LFO depth",0.,1.,.01);
+    obs_property_set_long_description(depth,"Sine modulation, shared phase across channels. Wet/dry is clamped to 0–1; amplitude modulation multiplies the output by 1 + depth × sine.");
     obs_property_set_long_description(wet,"0 = dry, 1 = wet. Input and output gain remain active with a valid effect; missing effects bypass unmodified. No latency compensation.");
     obs_property_set_modified_callback(path,manual_modified);
     obs_property_set_modified_callback(label,manual_modified);
