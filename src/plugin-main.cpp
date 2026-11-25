@@ -1,5 +1,5 @@
 #include <obs-module.h>
-#include "interop/sound_inputs.hpp"
+#include "interop/external_inputs.hpp"
 
 extern "C" struct obs_source_info mic_filter;
 extern "C" struct obs_source_info ladspa_filter;
@@ -8,11 +8,11 @@ OBS_DECLARE_MODULE()
 
 bool obs_module_load(void)
 {
-    hyperdsp::start_sound_polling();
+    hyperdsp::start_external_polling();
     obs_register_source(&mic_filter);
     obs_register_source(&ladspa_filter);
     obs_register_source(&native_filter);
     return true;
 }
 
-void obs_module_unload(void){hyperdsp::stop_sound_polling();}
+void obs_module_unload(void){hyperdsp::stop_external_polling();}

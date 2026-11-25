@@ -8,7 +8,7 @@
 namespace hyperdsp {
 enum class FilterMode { Bypass, LowPass, HighPass, BandPass, Notch, Peak, LowShelf, HighShelf, Comb, AllPass };
 enum class FilterAlignment { Resonant, Butterworth };
-enum class ModSource { Off, Lfo, Envelope, Bass, Mid, Treble, SoundCategory };
+enum class ModSource { Off, Lfo, Envelope, Bass, Mid, Treble, SoundCategory, SightMotion, SightHandX, SightHandY, SightPinch };
 enum class ModTarget { Cutoff, Resonance, Gain, Mix, Output };
 enum class WaveShape { Sine, Triangle, Square, Saw };
 struct FilterSettings {
@@ -94,7 +94,7 @@ class NativeFilter {
     float max_hz()const{return std::min(20000.f,.45f*rate_);}
     FilterSettings sanitize(FilterSettings s)const{
         if(unsigned(s.mode)>unsigned(FilterMode::AllPass))s.mode=FilterMode::Bypass;
-        if(unsigned(s.source)>unsigned(ModSource::SoundCategory))s.source=ModSource::Off;
+        if(unsigned(s.source)>unsigned(ModSource::SightPinch))s.source=ModSource::Off;
         if(unsigned(s.target)>unsigned(ModTarget::Output))s.target=ModTarget::Cutoff;
         if(unsigned(s.shape)>unsigned(WaveShape::Saw))s.shape=WaveShape::Sine;
         s.frequency=bound(s.frequency,20,max_hz(),std::min(1000.f,max_hz()));

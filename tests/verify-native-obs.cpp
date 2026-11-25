@@ -12,6 +12,7 @@
 #include <thread>
 #include <array>
 #include "sound-signal-fixture.hpp"
+#include "sight-signal-fixture.hpp"
 
 struct Stats {
     std::atomic<uint64_t> samples{0};
@@ -188,7 +189,30 @@ int main(int argc,char**argv){
         std::abs(unavailable[0]-.282843)<.004&&std::abs(disabled[0]-.282843)<.004&&
         std::abs(detached[0]-.282843)<.004;
     std::printf("SOUND_NATIVE_OBS active=%g unavailable=%g disabled=%g detached=%g calls=%u pass=%d\n",external[0],unavailable[0],disabled[0],detached[0],sound_fixture::calls.load(),external_ok);
-    bool ok=external_ok&&matrix_ok&&controls&&bass_active[0]>.40&&bass_reject[0]<.32&&treble_active[0]>.40&&treble_reject[0]<.32&&std::abs(resonant_cutoff[0]-.4/std::sqrt(2.)*.25)<.002&&std::abs(butter_cutoff[0]-.2)<.002&&opened[0]>2*closed[0]&&std::abs(opened[1]/opened[0]-.4)<.001&&std::abs(mix_dry[0]-.4/std::sqrt(2.))<.001&&low[0]>.27&&high[0]<.006&&steep[0]<.0001&&hp[0]>.27&&notch[0]<.0001&&
+    obs_register_source(&sight_fixture::info);
+    obs_data_set_int(settings,"mod_source",8);
+    obs_data_set_string(settings,"sight_channel","test-hand");
+    obs_source_update(filter,settings);
+    auto hand_x=measure(1000,60);
+    sight_fixture::ambiguous=true;
+    auto duplicate=measure(1000,60);
+    sight_fixture::ambiguous=false;
+    sight_fixture::bad_abi=true;
+    auto invalid=measure(1000,60);
+    sight_fixture::bad_abi=false;
+    obs_data_set_int(settings,"mod_source",9);
+    obs_source_update(filter,settings);
+    auto hand_y=measure(1000,60);
+    obs_data_set_int(settings,"mod_source",10);
+    obs_source_update(filter,settings);
+    auto pinch=measure(1000,60);
+    sight_fixture::available=false;
+    auto absent=measure(1000,60);
+    bool sight_ok=sight_fixture::calls>0&&std::abs(hand_x[0]-.494975)<.005&&
+        std::abs(hand_y[0]-.353553)<.005&&std::abs(pinch[0]-.339411)<.005&&
+        std::abs(duplicate[0]-.282843)<.005&&std::abs(invalid[0]-.282843)<.005&&std::abs(absent[0]-.282843)<.005;
+    std::printf("SIGHT_NATIVE_OBS x=%g y=%g pinch=%g duplicate=%g invalid=%g absent=%g pass=%d\n",hand_x[0],hand_y[0],pinch[0],duplicate[0],invalid[0],absent[0],sight_ok);
+    bool ok=sight_ok&&external_ok&&matrix_ok&&controls&&bass_active[0]>.40&&bass_reject[0]<.32&&treble_active[0]>.40&&treble_reject[0]<.32&&std::abs(resonant_cutoff[0]-.4/std::sqrt(2.)*.25)<.002&&std::abs(butter_cutoff[0]-.2)<.002&&opened[0]>2*closed[0]&&std::abs(opened[1]/opened[0]-.4)<.001&&std::abs(mix_dry[0]-.4/std::sqrt(2.))<.001&&low[0]>.27&&high[0]<.006&&steep[0]<.0001&&hp[0]>.27&&notch[0]<.0001&&
         std::abs(dry[0]-.4/std::sqrt(2.))<.001&&std::abs(dry[1]-.16/std::sqrt(2.))<.001&&
         std::abs(low[1]/low[0]-.4)<.001&&std::abs(hp[1]/hp[0]-.4)<.001;
     std::printf("NATIVE_ENVELOPE_OBS closed=%g opened=%g mix_dry=%g\n",closed[0],opened[0],mix_dry[0]);

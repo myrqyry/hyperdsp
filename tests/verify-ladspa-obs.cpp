@@ -13,6 +13,7 @@
 #include <array>
 #include <string>
 #include "sound-signal-fixture.hpp"
+#include "sight-signal-fixture.hpp"
 
 struct Stats {
     std::atomic<uint64_t> samples{0};
@@ -306,6 +307,46 @@ int main(int argc,char**argv) {
         std::abs(recovered[0]-.141421)<.004&&std::abs(external[1]/external[0]-.4)<.001;
     std::printf("SOUND_LADSPA_OBS active=%g stalled=%g wrong=%g recovered=%g picker=%d pass=%d\n",
         external[0],stalled[0],wrong[0],recovered[0],picker_ok,sound_ok);
+    obs_register_source(&sight_fixture::info);
+    obs_register_source(&sight_fixture::video_info);
+    obs_register_source(&sight_fixture::motion_info);
+    auto* video=obs_source_create("hyperdsp_test_video","camera fixture",nullptr,nullptr);
+    auto* motion=obs_source_create_private("sight_u2net_filter","motion fixture",nullptr);
+    obs_source_filter_add(video,motion);
+    const auto motion_channel=std::string(obs_source_get_uuid(video))+"/"+obs_source_get_uuid(motion);
+    obs_data_set_int(settings,"react2_source",7);
+    obs_data_set_string(settings,"react2_sight_channel",motion_channel.c_str());
+    obs_source_update(filter,settings);
+    auto movement=measure(100,60);
+    sight_fixture::bad_abi=true;
+    auto wrong_dimensions=measure(100,60);
+    sight_fixture::bad_abi=false;
+    obs_data_set_int(settings,"react2_source",8);
+    obs_data_set_string(settings,"react2_sight_channel","test-hand");
+    obs_source_update(filter,settings);
+    auto tracking=measure(100,60);
+    auto* sight_props=obs_source_properties(filter);
+    auto* sight_src=sight_props?obs_properties_get(sight_props,"react2_source"):nullptr;
+    if(sight_src)obs_property_modified(sight_src,settings);
+    auto* sight_choice=sight_props?obs_properties_get(sight_props,"react2_sight_channel"):nullptr;
+    bool sight_picker=false;
+    if(sight_choice)for(size_t i=0;i<obs_property_list_item_count(sight_choice);++i){
+        const char* v=obs_property_list_item_string(sight_choice,i);
+        if(v&&std::string(v)=="test-hand")sight_picker=true;
+    }
+    if(sight_props)obs_properties_destroy(sight_props);
+    obs_data_set_int(settings,"react2_source",7);
+    obs_data_set_string(settings,"react2_sight_channel",motion_channel.c_str());
+    obs_source_update(filter,settings);
+    obs_source_filter_remove(video,motion);obs_source_release(motion);obs_source_release(video);
+    auto motion_missing=measure(100,60);
+    obs_data_set_int(settings,"react2_source",0);
+    obs_source_update(filter,settings);
+    bool sight_ok=sight_picker&&sight_fixture::motion_calls>0&&sight_fixture::calls>0&&
+        std::abs(movement[0]-.127279)<.005&&std::abs(wrong_dimensions[0]-.070711)<.005&&
+        std::abs(tracking[0]-.176777)<.005&&std::abs(motion_missing[0]-.070711)<.005;
+    std::printf("SIGHT_LADSPA_OBS motion=%g invalid=%g tracking=%g missing=%g picker=%d pass=%d\n",
+        movement[0],wrong_dimensions[0],tracking[0],motion_missing[0],sight_picker,sight_ok);
     obs_data_set_double(settings,"output_db",12.);
     obs_data_set_string(settings,"label","unknown_label");
     obs_source_update(filter,settings);
@@ -314,7 +355,7 @@ int main(int argc,char**argv) {
     obs_source_update(filter,settings);
     auto dry=measure();
     auto near=[](double a,double b){return std::abs(a-b)<.005;};
-    bool pass=sound_ok && matrix_ok && react_ok && prop_ok && browser_ok && lfo_ok && near(quiet[0],.4/std::sqrt(2.)*.25) && near(quiet[1],.16/std::sqrt(2.)*.25)
+    bool pass=sight_ok && sound_ok && matrix_ok && react_ok && prop_ok && browser_ok && lfo_ok && near(quiet[0],.4/std::sqrt(2.)*.25) && near(quiet[1],.16/std::sqrt(2.)*.25)
         && near(louder[0],quiet[0]*2) && near(louder[1],quiet[1]*2)
         && near(blend[0],.4/std::sqrt(2.)*.75) && near(blend[1],.16/std::sqrt(2.)*.75)
         && near(bypass[0],.4/std::sqrt(2.)) && near(bypass[1],.16/std::sqrt(2.))
