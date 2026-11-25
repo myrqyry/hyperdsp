@@ -3,6 +3,9 @@
 #include <obs-module.h>
 #include <obs-frontend-api.h>
 #include <QApplication>
+#include <QPalette>
+#include <QStyle>
+#include <QEvent>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
@@ -51,6 +54,37 @@ QString effectName(const QJsonObject& item){return item.value("name").toString(i
 QPushButton* button(const QString& text,const char* name,QWidget* parent){
     auto* p=new QPushButton(text,parent);p->setObjectName(name);return p;
 }
+// The host palette is authoritative. Blend semantic roles, never fixed hues.
+QColor blend(QColor a,QColor b,double t){
+    return QColor::fromRgbF(a.redF()*(1-t)+b.redF()*t,a.greenF()*(1-t)+b.greenF()*t,a.blueF()*(1-t)+b.blueF()*t);
+}
+double luminance(QColor c){
+    auto linear=[](double x){return x<=.04045?x/12.92:std::pow((x+.055)/1.055,2.4);};
+    return .2126*linear(c.redF())+.7152*linear(c.greenF())+.0722*linear(c.blueF());
+}
+double contrast(QColor a,QColor b){
+    double x=luminance(a),y=luminance(b);return (std::max(x,y)+.05)/(std::min(x,y)+.05);
+}
+QColor readable(QColor preferred,QColor bg,QColor alternative,double minimum){
+    if(contrast(preferred,bg)>=minimum)return preferred;
+    for(int i=1;i<=20;++i){auto candidate=blend(preferred,alternative,i/20.);if(contrast(candidate,bg)>=minimum)return candidate;}
+    // If the host roles themselves have insufficient contrast, use the
+    // achromatic endpoint that is readable against the actual surface.
+    QColor neutral=luminance(bg)>.179?Qt::black:Qt::white;
+    for(int i=1;i<=20;++i){auto candidate=blend(preferred,neutral,i/20.);if(contrast(candidate,bg)>=minimum)return candidate;}
+    return neutral;
+}
+struct GraphColors {
+    QColor base,text,accent,edge,outline,terminal,native,external;
+    explicit GraphColors(const QPalette& p){
+        base=p.color(QPalette::Base);text=p.color(QPalette::Text);
+        accent=readable(p.color(QPalette::Highlight),base,text,3);
+        edge=readable(p.color(QPalette::Link),base,text,3);
+        outline=readable(p.color(QPalette::Mid),base,text,3);
+        terminal=blend(base,accent,.16);native=blend(base,p.color(QPalette::Button),.65);
+        external=blend(base,p.color(QPalette::Link),.12);
+    }
+};
 // Scene item identities are UI-only; the DSP graph still uses schema-1 indices.
 constexpr int input_id=-1,output_id=-2;
 QPainterPath cablePath(QPointF a,QPointF b,double laneHint=-10000){
@@ -74,7 +108,7 @@ public:
     }
     QRectF boundingRect()const override{return QGraphicsPathItem::boundingRect().adjusted(-6,-6,6,6);}
     void paint(QPainter* painter,const QStyleOptionGraphicsItem*,QWidget*)override{
-        auto stroke=pen();if(isSelected()){stroke.setColor(QColor("#d0f9ec"));stroke.setWidthF(3);}
+        auto stroke=pen();if(isSelected()){stroke.setColor(data(4).value<QColor>());stroke.setWidthF(3);}
         painter->setPen(stroke);painter->setBrush(Qt::NoBrush);painter->drawPath(path());
     }
 };
@@ -97,8 +131,8 @@ protected:
             setFocus();auto p=e->position().toPoint();
             if(auto* port=hit(p,"out")){
                 origin_=port->data(0).toInt();start_=port->sceneBoundingRect().center();
-                preview_=scene()->addPath(cablePath(start_,start_),QPen(QColor("#bcefe0"),2,Qt::DashLine));
-                preview_->setZValue(5);viewport()->setCursor(Qt::CrossCursor);e->accept();return;
+                preview_=scene()->addPath(cablePath(start_,start_),QPen(GraphColors(palette()).accent,2,Qt::DashLine));
+                preview_->setData(1,"preview");preview_->setZValue(5);viewport()->setCursor(Qt::CrossCursor);e->accept();return;
             }
             if(auto* node=hit(p,"node")){
                 if(node->flags()&QGraphicsItem::ItemIsSelectable){
@@ -205,23 +239,7 @@ QJsonObject empty(){return {{"schema",1},{"nodes",QJsonArray{}},{"output",-1}};}
 }
 EffectBuilder::EffectBuilder(QWidget* parent):QWidget(parent),draft_(empty()){
     setObjectName("hyperdspEffectBuilder");
-    // Deliberately compact dark surface; native controls retain keyboard accessibility.
-    setStyleSheet(R"(
-        QWidget#hyperdspEffectBuilder { background:#21262e; color:#e5e9ef; }
-        QWidget { color:#e5e9ef; background:#21262e; }
-        QLineEdit,QComboBox,QDoubleSpinBox,QListWidget,QTableWidget,QScrollArea { background:#171c23; border:1px solid #39444f; border-radius:6px; }
-        QComboBox,QDoubleSpinBox,QLineEdit { padding:3px 6px; min-height:20px; }
-        QPushButton { background:#303943; border:1px solid #47535f; border-radius:9px; padding:4px 9px; }
-        QPushButton:hover { background:#3c4854; } QPushButton:pressed { background:#242c35; }
-        QListWidget::item { padding:4px 6px; } QListWidget::item:selected { background:#3a5d58; }
-        QListWidget::item:alternate { background:#20262e; }
-        QTabWidget::pane { border:1px solid #39444f; border-radius:5px; }
-        QTabBar::tab { background:#2c3540; padding:5px 16px; border-top-left-radius:6px; border-top-right-radius:6px; }
-        QTabBar::tab:selected { background:#405c58; }
-        QHeaderView::section { background:#29333d; border:0; padding:4px; }
-        QSplitter::handle { background:#39444f; height:4px; }
-        QToolTip { background:#2b3540; color:#e5e9ef; border:1px solid #586674; }
-    )");
+    // Let OBS provide all widget styling, including custom theme QSS.
     auto* root=new QVBoxLayout(this);root->setContentsMargins(6,6,6,6);root->setSpacing(5);
     auto* targetRow=new QHBoxLayout;
     target_=new QComboBox;target_->setObjectName("target");target_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);target_->setMinimumContentsLength(12);
@@ -230,7 +248,7 @@ EffectBuilder::EffectBuilder(QWidget* parent):QWidget(parent),draft_(empty()){
     auto* tools=new QHBoxLayout;
     auto* open=button("Import","importGraph",this),*save=button("Export","exportGraph",this),*validate=button("Validate","validateGraph",this),*applyBtn=button("Apply","applyGraph",this);
     tools->addWidget(open);tools->addWidget(save);tools->addStretch();tools->addWidget(validate);tools->addWidget(applyBtn);root->addLayout(tools);
-    applyBtn->setStyleSheet("QPushButton { background:#32655e; color:#effff9; border:1px solid #50857b; border-radius:9px; padding:4px 14px; } QPushButton:hover {background:#41796f;}");
+    applyBtn->setDefault(true);
     auto* split=new QSplitter(Qt::Vertical);
     auto* viewPanel=new QWidget;auto* viewLayout=new QVBoxLayout(viewPanel);viewLayout->setContentsMargins(0,0,0,0);
     scene_=new QGraphicsScene(this);auto* canvas=new Canvas(scene_);graph_=canvas;
@@ -238,7 +256,7 @@ EffectBuilder::EffectBuilder(QWidget* parent):QWidget(parent),draft_(empty()){
     canvas->disconnectCable=[this](int to,int row){disconnectCable(to,row);};
     canvas->moved=[this](int id,QPointF pos){updateNodePosition(id,pos);};
     canvas->finishedMove=[this]{scene_->setSceneRect(scene_->itemsBoundingRect().adjusted(-30,-30,30,30));};graph_->setObjectName("graph");graph_->setRenderHint(QPainter::Antialiasing);
-    graph_->setBackgroundBrush(QColor("#171c23"));graph_->setDragMode(QGraphicsView::ScrollHandDrag);graph_->setMinimumHeight(160);
+    graph_->setBackgroundBrush(palette().color(QPalette::Base));graph_->setDragMode(QGraphicsView::ScrollHandDrag);graph_->setMinimumHeight(160);
     viewLayout->addWidget(graph_,1);
     auto* outputRow=new QHBoxLayout;outputRow->addWidget(new QLabel("Output"));
     output_=new QComboBox;output_->setObjectName("outputNode");outputRow->addWidget(output_,1);
@@ -306,7 +324,43 @@ EffectBuilder::EffectBuilder(QWidget* parent):QWidget(parent),draft_(empty()){
     });
     refreshTargets();inventory_=inventory();refreshLibrary();redraw();inspect();message("Add a HyperDSP Graph filter to an audio source, then select it here. Edits are drafts until Apply.");
 }
-void EffectBuilder::message(const QString& s,bool error){status_->setText(s);status_->setStyleSheet(error?"color:#ed9e86;":"");}
+void EffectBuilder::message(const QString& s,bool error){
+    statusError_=error;status_->setText(error?"Error: "+s:s);refreshTheme();
+}
+void EffectBuilder::changeEvent(QEvent* event){
+    QWidget::changeEvent(event);
+    if((event->type()==QEvent::PaletteChange||event->type()==QEvent::ApplicationPaletteChange||event->type()==QEvent::StyleChange)&&status_)
+        refreshTheme();
+}
+void EffectBuilder::refreshTheme(){
+    if(!status_)return;
+    const GraphColors c(palette());
+    graph_->setBackgroundBrush(c.base);
+    for(auto* item:scene_->items()){
+        auto role=item->data(1).toString();
+        if(role=="node"){
+            auto* node=static_cast<QGraphicsPathItem*>(item);
+            auto kind=item->data(3).toString();
+            QColor fill=kind=="terminal"?c.terminal:kind=="ladspa"?c.external:c.native;
+            node->setBrush(fill);node->setPen(QPen(c.outline));
+            for(auto* child:node->childItems())if(child->data(1).toString()=="label")
+                static_cast<QGraphicsSimpleTextItem*>(child)->setBrush(readable(c.text,fill,c.text,4.5));
+        }else if(role=="in"||role=="out"){
+            auto* port=static_cast<QGraphicsEllipseItem*>(item);port->setPen(QPen(c.text,1.2));port->setBrush(c.accent);
+        }else if(role=="cable"){
+            auto* wire=static_cast<QGraphicsPathItem*>(item);
+            bool inverted=item->data(3).toBool();wire->setPen(QPen(inverted?c.edge:c.accent,2,inverted?Qt::DashLine:Qt::SolidLine));
+            wire->setData(4,c.text);
+        }else if(role=="preview"){
+            static_cast<QGraphicsPathItem*>(item)->setPen(QPen(c.accent,2,Qt::DashLine));
+        }else if(role=="weight"){
+            static_cast<QGraphicsSimpleTextItem*>(item)->setBrush(c.text);
+        }
+    }
+    // Textual error status remains distinguishable even in monochrome themes.
+    auto font=status_->font();font.setBold(statusError_);status_->setFont(font);
+    graph_->viewport()->update();
+}
 void EffectBuilder::refreshTargets(){
     auto old=target_->currentData();std::vector<Target> targets;obs_enum_sources(collect_source,&targets);
     target_->clear();for(auto& t:targets)target_->addItem(t.label,QStringList{t.parent,t.filter});
@@ -359,32 +413,33 @@ void EffectBuilder::redraw(){
     positions_.try_emplace(input_id,10,28);
     positions_.try_emplace(output_id,142+std::min(count,3)*188,28);
     for(int i=0;i<count;++i)positions_.try_emplace(i,142+(i%3)*188,28+(i/3)*110);
-    auto card=[this](QString text,int id,int width,QColor fill){
+    auto card=[this](QString text,int id,int width,QString kind){
+        const GraphColors c(palette());
         QPainterPath shape;shape.addRoundedRect(QRectF(0,0,width,52),8,8);
-        auto* box=scene_->addPath(shape,QPen(QColor("#61737e")),QBrush(fill));
-        box->setData(0,id);box->setData(1,"node");box->setPos(positions_.at(id));box->setZValue(2);
+        auto* box=scene_->addPath(shape,QPen(c.outline),QBrush(kind=="terminal"?c.terminal:kind=="ladspa"?c.external:c.native));
+        box->setData(0,id);box->setData(1,"node");box->setData(3,kind);box->setPos(positions_.at(id));box->setZValue(2);
         box->setToolTip(text+" · Drag to move");
         if(id>=0){box->setFlag(QGraphicsItem::ItemIsSelectable);box->setSelected(id==selected_);}
         auto* label=new QGraphicsSimpleTextItem(QFontMetrics(QApplication::font()).elidedText(text,Qt::ElideRight,width-20),box);
-        label->setBrush(QColor("#e9eef1"));label->setPos(10,16);
+        label->setData(1,"label");label->setBrush(c.text);label->setPos(10,16);
         for(bool outgoing:{false,true}){
             if((id==input_id&&!outgoing)||(id==output_id&&outgoing))continue;
             auto* port=new QGraphicsEllipseItem((outgoing?width:0)-5,21,10,10,box);
             port->setData(0,id);port->setData(1,outgoing?"out":"in");
-            port->setZValue(3);port->setPen(QPen(QColor("#b4d8cc"),1.2));port->setBrush(QColor("#66b8aa"));
+            port->setZValue(3);port->setPen(QPen(c.text,1.2));port->setBrush(c.accent);
             port->setToolTip(outgoing?"Drag to an input port":"Connect an output here");
             port->setAcceptHoverEvents(true);
         }
     };
-    card("INPUT",input_id,100,QColor("#29463f"));
+    card("INPUT",input_id,100,"terminal");
     for(int i=0;i<count;++i){
         auto e=metadata(nodes[i].toObject().value("effect").toString());
         QString title=QString::number(i+1)+" · "+effectName(e);
-        output_->addItem(title,i);card(title,i,156,e.value("format").toString()=="ladspa"?QColor("#30415c"):QColor("#3b3651"));
+        output_->addItem(title,i);card(title,i,156,e.value("format").toString()=="ladspa"?"ladspa":"native");
     }
-    card("OUTPUT",output_id,100,QColor("#29463f"));
+    card("OUTPUT",output_id,100,"terminal");
     output_->setCurrentIndex(output_->findData(out));
-    redrawWires();scene_->setSceneRect(scene_->itemsBoundingRect().adjusted(-30,-30,30,30));
+    redrawWires();refreshTheme();scene_->setSceneRect(scene_->itemsBoundingRect().adjusted(-30,-30,30,30));
     fitCanvas();
 }
 void EffectBuilder::redrawWires(){
@@ -398,13 +453,13 @@ void EffectBuilder::redrawWires(){
             if(id!=from&&id!=to&&pos.x()<std::max(a.x(),b.x())&&pos.x()+156>std::min(a.x(),b.x()))
                 lane=std::max(lane,pos.y()+74);
         }
-        auto path=cablePath(a,b,lane);const QColor color(weight<0?"#db9b6b":"#66b8aa");
+        auto path=cablePath(a,b,lane);const GraphColors c(palette());const QColor color=weight<0?c.edge:c.accent;
         auto* item=new CableItem(path);item->setData(0,to);item->setData(1,"cable");item->setData(2,row);
-        item->setPen(QPen(color,2));item->setZValue(0);item->setFlag(QGraphicsItem::ItemIsSelectable);
+        item->setData(3,weight<0);item->setData(4,c.text);item->setPen(QPen(color,2,weight<0?Qt::DashLine:Qt::SolidLine));item->setZValue(0);item->setFlag(QGraphicsItem::ItemIsSelectable);
         item->setToolTip(to>=0?"Select and Delete, or right-click to disconnect":"Drag another output to the Output port to reroute");
         scene_->addItem(item);
         if(std::abs(weight-1)>1e-6){
-            auto* text=scene_->addSimpleText(QString::number(weight,'g',3)+"×");text->setData(1,"weight");text->setBrush(color);
+            auto* text=scene_->addSimpleText(QString::number(weight,'g',3)+"×");text->setData(1,"weight");text->setBrush(c.text);
             auto midpoint=path.pointAtPercent(.5);text->setPos(midpoint.x()-text->boundingRect().width()/2,midpoint.y()+2);
             text->setAcceptedMouseButtons(Qt::NoButton);
         }
@@ -571,6 +626,8 @@ void frontend_event(enum obs_frontend_event event,void*){
         if(obs_frontend_add_dock_by_id("hyperdsp.effect_builder","HyperDSP Effect Builder",widget)){
             dock=widget;blog(LOG_INFO,"[HyperDSP] Effect Builder dock registered");
         }else {blog(LOG_WARNING,"[HyperDSP] Effect Builder dock registration rejected");delete widget;}
+    }else if(event==OBS_FRONTEND_EVENT_THEME_CHANGED&&dock){
+        QTimer::singleShot(0,dock.data(),[]{if(dock)dock->refreshTheme();});
     }else if(event==OBS_FRONTEND_EVENT_EXIT&&dock){
         obs_frontend_remove_dock("hyperdsp.effect_builder");if(dock)delete dock.data();dock=nullptr;
     }

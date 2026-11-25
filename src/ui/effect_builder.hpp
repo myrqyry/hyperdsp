@@ -13,6 +13,9 @@ public:
     explicit EffectBuilder(QWidget* parent=nullptr);
     QJsonObject draft()const{return draft_;}
     void setDraft(const QJsonObject&);
+    void refreshTheme();
+protected:
+    void changeEvent(QEvent*) override;
 private:
     QJsonObject draft_;
     QJsonArray inventory_;
@@ -26,7 +29,8 @@ private:
     QGraphicsScene* scene_;
     QFormLayout* parameters_;
     QTableWidget* edges_;
-    QLabel* status_;
+    QLabel* status_=nullptr;
+    bool statusError_=false;
     void refreshTargets();
     void refreshLibrary();
     void redraw();

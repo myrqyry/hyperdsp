@@ -8,6 +8,8 @@
 #include <QGraphicsItem>
 #include <QGraphicsScene>
 #include <QGraphicsPathItem>
+#include <QPalette>
+#include <QGraphicsSimpleTextItem>
 #include <QTableWidget>
 #include <QLabel>
 #include <QDoubleSpinBox>
@@ -148,6 +150,24 @@ int main(int argc,char** argv){
                 auto* node=item("node",1);
                 if(node)QTest::mouseClick(graph->viewport(),Qt::LeftButton,Qt::NoModifier,center(node));
             }
+            auto beforeTheme=builder.draft();
+            auto* originalNode=item("node",0);auto originalPos=originalNode->pos();
+            auto originalPalette=app.palette();
+            bool themed=true;
+            for(bool light:{true,false}){
+                QPalette p=originalPalette;
+                auto bg=QColor(light?"#fff4df":"#18232e"),fg=QColor(light?"#242019":"#ecf6ff"),accent=QColor(light?"#7c237b":"#efb35e");
+                p.setColor(QPalette::Window,bg);p.setColor(QPalette::Base,bg);p.setColor(QPalette::WindowText,fg);
+                p.setColor(QPalette::Text,fg);p.setColor(QPalette::Highlight,accent);p.setColor(QPalette::ButtonText,fg);
+                app.setPalette(p);QTest::qWait(30);
+                auto* node=static_cast<QGraphicsPathItem*>(item("node",0));
+                themed=themed&&graph->backgroundBrush().color()==bg&&node&&node==originalNode&&node->pos()==originalPos&&builder.draft()==beforeTheme;
+                auto* wire=static_cast<QGraphicsPathItem*>(item("cable",1,1));
+                themed=themed&&wire&&wire->pen().color()==accent;
+                themed=themed&&builder.styleSheet().isEmpty()&&apply->styleSheet().isEmpty();
+            }
+            app.setPalette(originalPalette);QTest::qWait(30);
+            std::printf("BUILDER_THEME_PASS=%d\n",themed);ok=ok&&themed;
             std::printf("BUILDER_CANVAS_PASS=%d\n",canvas);ok=ok&&canvas;
             auto* gain=builder.findChild<QDoubleSpinBox*>("param_gain_db");ok=ok&&gain;
             if(gain)gain->setValue(-6);
