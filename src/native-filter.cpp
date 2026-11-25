@@ -24,10 +24,10 @@ FilterSettings read(obs_data_t* s){
     f.alignment=FilterAlignment(enumeration("alignment",1,0));
     f.stages=unsigned(std::clamp(obs_data_get_int(s,"stages"),1LL,4LL));
     f.wet=number("mix");f.input_db=number("input_db");f.output_db=number("output_db");
-    f.source=ModSource(enumeration("mod_source",2,0));f.target=ModTarget(enumeration("mod_target",4,0));
+    f.source=ModSource(enumeration("mod_source",5,0));f.target=ModTarget(enumeration("mod_target",4,0));
     f.shape=WaveShape(enumeration("wave_shape",3,0));
     f.hz=number("lfo_rate");f.depth=number("mod_depth");
-    f.attack_ms=number("attack_ms");f.release_ms=number("release_ms");
+    f.attack_ms=number("attack_ms");f.release_ms=number("release_ms");f.band_sensitivity=number("band_sensitivity");
     return f;
 }
 void defaults(obs_data_t* s){
@@ -38,7 +38,7 @@ void defaults(obs_data_t* s){
     obs_data_set_default_int(s,"mod_source",0);obs_data_set_default_int(s,"mod_target",0);
     obs_data_set_default_int(s,"wave_shape",0);obs_data_set_default_double(s,"lfo_rate",1);
     obs_data_set_default_double(s,"mod_depth",0);obs_data_set_default_double(s,"attack_ms",10);
-    obs_data_set_default_double(s,"release_ms",100);
+    obs_data_set_default_double(s,"release_ms",100);obs_data_set_default_double(s,"band_sensitivity",0);
 }
 void update(void* ptr,obs_data_t* s){
     auto* f=static_cast<NativeSource*>(ptr);if(!f)return;
@@ -66,7 +66,7 @@ bool visibility(obs_properties_t* p,obs_property_t*,obs_data_t* s){
     show("frequency",mode!=0);
     show("mod_target",source!=0);show("mod_depth",source!=0);
     show("wave_shape",source==1);show("lfo_rate",source==1);
-    show("attack_ms",source==2);show("release_ms",source==2);
+    show("attack_ms",source>=2);show("release_ms",source>=2);show("band_sensitivity",source>=3);
     return true;
 }
 obs_properties_t* properties(void*){
@@ -96,7 +96,7 @@ obs_properties_t* properties(void*){
     slider("input_db","Input gain",-24,24,.1," dB");
     slider("mix","Wet / dry",0,1,.01);
     slider("output_db","Output gain",-24,24,.1," dB");
-    auto* source=list("mod_source","Modulation source",{"Off","LFO","Input envelope"});
+    auto* source=list("mod_source","Modulation source",{"Off","LFO","Input envelope","Bass energy (<250 Hz)","Mid energy (250–2500 Hz)","Treble energy (>2500 Hz)"});
     list("mod_target","Modulation target",{"Cutoff","Resonance (Q)","EQ gain","Wet / dry","Output amplitude"});
     list("wave_shape","Waveform",{"Sine","Triangle","Square","Saw"});
     slider("lfo_rate","LFO rate",.05,20,.05," Hz");
@@ -104,6 +104,7 @@ obs_properties_t* properties(void*){
     obs_property_set_long_description(depth,"At full depth: cutoff ±4 octaves, Q ±2 octaves (not in Butterworth), EQ gain ±12 dB, wet/dry ±1, or output amplitude ×(1 + modulation). Envelope is positive-only.");
     slider("attack_ms","Envelope attack",1,200,1," ms");
     slider("release_ms","Envelope release",10,2000,10," ms");
+    slider("band_sensitivity","Band sensitivity",-24,24,.1," dB");
     obs_property_set_modified_callback(mode,visibility);
     obs_property_set_modified_callback(source,visibility);
     return p;

@@ -84,15 +84,15 @@ int main(int argc,char**argv){
     bool controls=props&&obs_property_list_item_count(obs_properties_get(props,"mode"))==10 &&
         obs_properties_get(props,"frequency")&&obs_properties_get(props,"q")&&
         obs_properties_get(props,"stages")&&obs_properties_get(props,"alignment")&&obs_properties_get(props,"mod_source")&&
-        obs_properties_get(props,"mod_target")&&obs_properties_get(props,"mix");
+        obs_properties_get(props,"mod_target")&&obs_properties_get(props,"band_sensitivity")&&obs_properties_get(props,"mix");
     if(props)obs_properties_destroy(props);
     obs_source_filter_add(source,filter);
     obs_set_output_source(1,source);
     obs_source_set_audio_mixers(source,1);
     obs_source_inc_active(source);obs_source_set_audio_active(source,true);
     obs_source_set_async_unbuffered(source,true);
-    auto measure=[&](double hz){
-        stream(source,10,hz);
+    auto measure=[&](double hz,int warmup=10){
+        stream(source,warmup,hz);
         Stats stats;obs_source_add_audio_capture_callback(source,capture,&stats);
         stream(source,40,hz);
         obs_source_remove_audio_capture_callback(source,capture,&stats);
@@ -124,14 +124,29 @@ int main(int argc,char**argv){
     obs_data_set_double(settings,"mix",0.);
     obs_source_update(filter,settings);
     auto mix_dry=measure(1000);
+    obs_data_set_int(settings,"mode",9);
+    obs_data_set_double(settings,"mix",1.);
+    obs_data_set_int(settings,"mod_source",3);
+    obs_data_set_int(settings,"mod_target",4);
+    obs_data_set_double(settings,"mod_depth",1.);
+    obs_data_set_double(settings,"band_sensitivity",6.);
+    obs_source_update(filter,settings);
+    auto bass_active=measure(100);
+    auto bass_reject=measure(8000,60);
+    obs_data_set_int(settings,"mod_source",5);
+    obs_source_update(filter,settings);
+    auto treble_active=measure(8000);
+    auto treble_reject=measure(100,60);
+    obs_data_set_int(settings,"mod_source",0);
     obs_data_set_double(settings,"mix",1.);
     obs_data_set_int(settings,"mode",0);obs_source_update(filter,settings);
     auto dry=measure(8000);
-    bool ok=controls&&std::abs(resonant_cutoff[0]-.4/std::sqrt(2.)*.25)<.002&&std::abs(butter_cutoff[0]-.2)<.002&&opened[0]>2*closed[0]&&std::abs(opened[1]/opened[0]-.4)<.001&&std::abs(mix_dry[0]-.4/std::sqrt(2.))<.001&&low[0]>.27&&high[0]<.006&&steep[0]<.0001&&hp[0]>.27&&notch[0]<.0001&&
+    bool ok=controls&&bass_active[0]>.40&&bass_reject[0]<.32&&treble_active[0]>.40&&treble_reject[0]<.32&&std::abs(resonant_cutoff[0]-.4/std::sqrt(2.)*.25)<.002&&std::abs(butter_cutoff[0]-.2)<.002&&opened[0]>2*closed[0]&&std::abs(opened[1]/opened[0]-.4)<.001&&std::abs(mix_dry[0]-.4/std::sqrt(2.))<.001&&low[0]>.27&&high[0]<.006&&steep[0]<.0001&&hp[0]>.27&&notch[0]<.0001&&
         std::abs(dry[0]-.4/std::sqrt(2.))<.001&&std::abs(dry[1]-.16/std::sqrt(2.))<.001&&
         std::abs(low[1]/low[0]-.4)<.001&&std::abs(hp[1]/hp[0]-.4)<.001;
     std::printf("NATIVE_ENVELOPE_OBS closed=%g opened=%g mix_dry=%g\n",closed[0],opened[0],mix_dry[0]);
     std::printf("BUTTERWORTH_OBS resonant=%g butterworth=%g\n",resonant_cutoff[0],butter_cutoff[0]);
+    std::printf("BAND_OBS bass_active=%g bass_reject=%g treble_active=%g treble_reject=%g\n",bass_active[0],bass_reject[0],treble_active[0],treble_reject[0]);
     std::printf("NATIVE_OBS low=%g high=%g steep=%g hp=%g notch=%g dry=%g,%g controls=%d pass=%d\n",
         low[0],high[0],steep[0],hp[0],notch[0],dry[0],dry[1],controls,ok);
     obs_set_output_source(1,nullptr);
