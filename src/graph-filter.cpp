@@ -241,8 +241,44 @@ void update(void* ptr,obs_data_t* settings){
     control.unlock();
     if(refresh&&f->source)obs_source_update_properties(f->source);
 }
+// Explicit builder transaction: prepare once, publish only on success.
+void builder_apply(void* ptr,calldata_t* data){
+    auto* f=static_cast<Source*>(ptr);
+    calldata_set_bool(data,"ok",false);
+    const char* raw_ptr=nullptr;
+    if(!f||!f->source||!calldata_get_string(data,"graph",&raw_ptr)||!raw_ptr){
+        calldata_set_string(data,"status","Missing graph");return;
+    }
+    std::string raw(raw_ptr),error;
+    bool validate_only=calldata_bool(data,"validate_only");
+    std::unique_lock control(f->control);
+    obs_audio_info ai{};
+    if(!obs_get_audio_info(&ai)){calldata_set_string(data,"status","Audio format unavailable");return;}
+    auto* settings=obs_source_get_settings(f->source);
+    if(!settings){calldata_set_string(data,"status","Settings unavailable");return;}
+    std::unique_ptr<obs_data_t,decltype(&obs_data_release)> hold(settings,obs_data_release);
+    auto next=prepare(raw,ai.samples_per_sec,get_audio_channels(ai.speakers),settings,error);
+    if(!next.graph){calldata_set_string(data,"status",error.c_str());return;}
+    std::string status="Validated · "+std::to_string(next.graph->latency())+" samples known latency";
+    if(!next.graph->latency_known())status+="; external latency unknown";
+    if(!validate_only){
+        for(auto& c:next.graph->controls())obs_data_set_default_double(settings,control_key(c).c_str(),c.initial);
+        obs_data_set_string(settings,"graph_json",raw.c_str());
+        {
+            std::lock_guard lock(f->mutex);
+            f->active.swap(next.graph);std::swap(f->external,next.external);
+            f->rate=ai.samples_per_sec;f->channels=get_audio_channels(ai.speakers);
+            f->accepted=raw;f->error.clear();
+        }
+        control.unlock();
+        obs_source_update(f->source,settings);
+        obs_source_update_properties(f->source);
+        status="Applied · "+status.substr(std::string("Validated · ").size());
+    }
+    calldata_set_bool(data,"ok",true);calldata_set_string(data,"status",status.c_str());
+}
 void defaults(obs_data_t* s){obs_data_set_default_string(s,"graph_json",empty_graph);}
-void* create(obs_data_t* s,obs_source_t* source){auto p=std::make_unique<Source>();p->source=source;update(p.get(),s);return p.release();}
+void* create(obs_data_t* s,obs_source_t* source){auto p=std::make_unique<Source>();p->source=source;proc_handler_add(obs_source_get_proc_handler(source),"void hyperdsp_graph_apply_v1(in string graph, in bool validate_only, out bool ok, out string status)",builder_apply,p.get());update(p.get(),s);return p.release();}
 void destroy(void* p){delete static_cast<Source*>(p);}
 const char* name(void*){return "HyperDSP Graph";}
 bool restore_working_graph(obs_properties_t*,obs_property_t*,void* ptr){

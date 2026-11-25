@@ -45,6 +45,8 @@ Standalone conventional audio effects and hosting for OBS, with optional inputs 
 
 - Per-filter accepted graph recovery using OBS source saves; revalidation on creation, rejected draft retention, explicit restoration and actual libobs serialization/audio regression.
 
+- Optional native Qt Effect Builder dock: visual graph, searchable native/LADSPA library, generated parameter inspector, weighted input editing, JSON import/export and validated explicit apply. Widget and isolated desktop registration verified.
+
 ## Next layers
 
 - Unified discoverable effect library: favorites, native/installed external/community definitions, backend compatibility, descriptions, safe explicit acquisition and reusable presets. Reset/import/export and a compact native frequency-response view.

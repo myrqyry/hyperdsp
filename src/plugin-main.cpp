@@ -1,6 +1,9 @@
 #include <obs-module.h>
 #include "interop/external_inputs.hpp"
 #include "ladspa-catalog.hpp"
+#ifdef HYPERDSP_WITH_BUILDER
+#include "ui/effect_builder.hpp"
+#endif
 
 extern "C" struct obs_source_info mic_filter;
 extern "C" struct obs_source_info ladspa_filter;
@@ -27,7 +30,14 @@ bool obs_module_load(void)
     obs_register_source(&spectral_filter);
     obs_register_source(&formant_filter);
     obs_register_source(&graph_filter);
+#ifdef HYPERDSP_WITH_BUILDER
+    hyperdsp::register_effect_builder();
+#endif
     return true;
 }
 
-void obs_module_unload(void){hyperdsp::CatalogScan::stop();hyperdsp::stop_external_polling();}
+void obs_module_unload(void){
+#ifdef HYPERDSP_WITH_BUILDER
+    hyperdsp::unregister_effect_builder();
+#endif
+hyperdsp::CatalogScan::stop();hyperdsp::stop_external_polling();}
