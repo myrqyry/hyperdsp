@@ -202,6 +202,42 @@ int main(int argc,char**argv) {
     obs_data_set_double(settings,"react_sensitivity",6.);
     obs_source_update(filter,settings);
     auto bass=measure(100,60);
+    // Second route shares the first destination, third drives the mixer.
+    obs_data_set_int(settings,"react2_source",3);
+    obs_data_set_string(settings,"react2_target",port.c_str());
+    obs_data_set_double(settings,"react2_amount",.25);
+    obs_data_set_double(settings,"react2_sensitivity",6.);
+    obs_data_set_int(settings,"react3_source",3);
+    obs_data_set_string(settings,"react3_target","output");
+    obs_data_set_double(settings,"react3_amount",-.5);
+    obs_data_set_double(settings,"react3_sensitivity",6.);
+    obs_source_update(filter,settings);
+    auto simultaneous=measure(100,60);
+    // Disable only route 3; the two same-destination routes remain summed.
+    obs_data_set_int(settings,"react3_source",0);
+    obs_source_update(filter,settings);
+    auto summed=measure(100,60);
+    // The fourth slot cancels the second route at the same destination.
+    obs_data_set_int(settings,"react4_source",3);
+    obs_data_set_string(settings,"react4_target",port.c_str());
+    obs_data_set_double(settings,"react4_amount",-.25);
+    obs_data_set_double(settings,"react4_sensitivity",6.);
+    obs_source_update(filter,settings);
+    auto canceled=measure(100,60);
+    obs_data_set_int(settings,"react4_source",0);
+    obs_data_set_int(settings,"react2_source",0);
+    obs_source_update(filter,settings);
+    auto restored=measure(100,60);
+    auto* matrix_props=obs_source_properties(filter);
+    bool matrix_ok=matrix_props&&obs_properties_get(matrix_props,"react2_target")&&
+        obs_properties_get(matrix_props,"react3_target")&&obs_properties_get(matrix_props,"react4_target");
+    if(matrix_props)obs_properties_destroy(matrix_props);
+    matrix_ok=matrix_ok&&std::abs(canceled[0]-bass[0])<.002&&summed[0]>bass[0]*1.2&&simultaneous[0]<summed[0]*.8&&
+        simultaneous[0]>.1&&std::abs(restored[0]-bass[0])<.002&&
+        std::abs(summed[1]/summed[0]-.4)<.001;
+    std::printf("LADSPA_MATRIX single=%g combined=%g summed=%g canceled=%g restored=%g pass=%d\n",
+       bass[0],simultaneous[0],summed[0],canceled[0],restored[0],matrix_ok);
+
     auto reject=measure(9000,100);
     obs_data_set_string(settings,"label","amp_stereo");
     obs_source_update(filter,settings);
@@ -237,7 +273,7 @@ int main(int argc,char**argv) {
     obs_source_update(filter,settings);
     auto dry=measure();
     auto near=[](double a,double b){return std::abs(a-b)<.005;};
-    bool pass=react_ok && prop_ok && browser_ok && lfo_ok && near(quiet[0],.4/std::sqrt(2.)*.25) && near(quiet[1],.16/std::sqrt(2.)*.25)
+    bool pass=matrix_ok && react_ok && prop_ok && browser_ok && lfo_ok && near(quiet[0],.4/std::sqrt(2.)*.25) && near(quiet[1],.16/std::sqrt(2.)*.25)
         && near(louder[0],quiet[0]*2) && near(louder[1],quiet[1]*2)
         && near(blend[0],.4/std::sqrt(2.)*.75) && near(blend[1],.16/std::sqrt(2.)*.75)
         && near(bypass[0],.4/std::sqrt(2.)) && near(bypass[1],.16/std::sqrt(2.))

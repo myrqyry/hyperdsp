@@ -15,6 +15,10 @@
 namespace {
 constexpr unsigned max_ports=256;
 constexpr unsigned block_size=1024;
+constexpr unsigned route_count=4;
+std::string route_key(unsigned slot,const char* field){
+    return (slot==0?std::string("react_"):"react"+std::to_string(slot+1)+"_")+field;
+}
 struct Control {
     unsigned port;
     std::string name;
@@ -68,14 +72,19 @@ struct Instance {
     hyperdsp::MixModulator modulation;
     std::array<hyperdsp::MixSettings,block_size> mix_frames{};
     bool initialized=false;
-    hyperdsp::ReactiveSource reactive;
-    hyperdsp::LinearRamp react_amount;
-    int react_source=0,react_port=-1;
-    bool react_mix=false,react_output=false;
+    struct Route {
+        hyperdsp::ReactiveSource signal;
+        hyperdsp::LinearRamp amount;
+        int source=0,port=-1;
+        bool mix=false,output=false;
+        float min=0,max=0;
+        std::string saved_target;
+    };
+    std::array<Route,route_count> routes;
+    bool any_route=false,any_port=false;
     std::array<float,max_ports> base_values{};
-    float react_min=0,react_max=0;
     std::array<float,MAX_AUDIO_CHANNELS> detector_input{};
-    std::string path,label,saved_react_target;
+    std::string path,label;
     ~Instance() {
         if(descriptor)for(auto& v:voices)if(v->handle){
             if(v->activated&&descriptor->deactivate)descriptor->deactivate(v->handle);
@@ -92,28 +101,32 @@ struct Instance {
         const bool first=!initialized;
         if(initialized)modulation.set(mix,lfo);
         else {modulation.reset(rate,mix,lfo);initialized=true;}
-        const auto source=obs_data_get_int(settings,"react_source");
-        const auto shape=obs_data_get_int(settings,"react_shape");
-        const std::string target_id_value=obs_data_get_string(settings,"react_target");
-        saved_react_target=target_id_value;
-        const int previous_port=react_port;
-        const bool previous_mix=react_mix,previous_output=react_output;
-        const int previous_source=react_source;
-        react_source=source>=0&&source<=5?int(source):0;
-        react_port=-1;react_mix=target_id_value=="mix";react_output=target_id_value=="output";
-        for(const auto& c:controls)
-            if(!c.integer&&!c.toggle&&c.max>c.min&&target_id_value==target_id(path,label,c.port)){
-                react_port=int(c.port);react_min=c.min;react_max=c.max;
-            }
-        if(react_port<0&&!react_mix&&!react_output)react_source=0;
-        reactive.configure(rate,react_source,shape>=0&&shape<=3?int(shape):0,
-            obs_data_get_double(settings,"react_rate"),obs_data_get_double(settings,"react_attack"),
-            obs_data_get_double(settings,"react_release"),obs_data_get_double(settings,"react_sensitivity"));
-        const double limit=react_port>=0?10000.:1.;
-        const float amount=react_source?hyperdsp::MixSettings::bounded(obs_data_get_double(settings,"react_amount"),-limit,limit,0):0;
-        if(first||previous_port!=react_port||previous_mix!=react_mix||previous_output!=react_output||previous_source!=react_source)
-            react_amount.reset(first?amount:0.f);
-        react_amount.set(amount,std::max(1u,rate/100));
+        any_route=any_port=false;
+        for(unsigned slot=0;slot<route_count;++slot){
+            auto& r=routes[slot];
+            auto integer=[&](const char* key){return obs_data_get_int(settings,route_key(slot,key).c_str());};
+            auto number=[&](const char* key){return obs_data_get_double(settings,route_key(slot,key).c_str());};
+            const auto source=integer("source"),shape=integer("shape");
+            const std::string target=obs_data_get_string(settings,route_key(slot,"target").c_str());
+            const bool changed=r.saved_target!=target;
+            const int previous_source=r.source;
+            r.saved_target=target;
+            r.source=source>=0&&source<=5?int(source):0;
+            r.port=-1;r.mix=target=="mix";r.output=target=="output";
+            for(const auto& c:controls)
+                if(!c.integer&&!c.toggle&&c.max>c.min&&target==target_id(path,label,c.port)){
+                    r.port=int(c.port);r.min=c.min;r.max=c.max;
+                }
+            if(r.port<0&&!r.mix&&!r.output)r.source=0;
+            r.signal.configure(rate,r.source,shape>=0&&shape<=3?int(shape):0,
+                number("rate"),number("attack"),number("release"),number("sensitivity"));
+            const double limit=r.port>=0?10000.:1.;
+            const float amount=r.source?hyperdsp::MixSettings::bounded(number("amount"),-limit,limit,0):0;
+            if(first||changed||previous_source!=r.source)r.amount.reset(first?amount:0.f);
+            r.amount.set(amount,std::max(1u,rate/100));
+            any_route=any_route||r.source!=0;
+            any_port=any_port||(r.source!=0&&r.port>=0);
+        }
         for(auto& c:controls){
             auto k=key(c.port);
             if(c.toggle)obs_data_set_default_bool(settings,k.c_str(),c.initial!=0);
@@ -175,23 +188,39 @@ struct Instance {
     void process(obs_audio_data* audio) {
         for(unsigned c=0;c<channels;++c)if(!audio->data[c])return;
         for(unsigned off=0;off<audio->frames;){
-            unsigned n=std::min(react_source&&react_port>=0?64u:block_size,audio->frames-off);
-            float port_signal=0;
-            // Advance once per audio sample, never once per voice/channel.
+            unsigned n=std::min(any_port?64u:block_size,audio->frames-off);
+            std::array<float,route_count> port_sums{};
+            // All routes see the same pre-trim input and advance once per sample.
+            // Sum contributions to each destination before applying its bounds.
             for(unsigned j=0;j<n;++j){
                 auto mix=modulation.next();
-                if(react_source){
+                if(any_route){
                     for(unsigned c=0;c<channels;++c)detector_input[c]=reinterpret_cast<float*>(audio->data[c])[off+j];
-                    const float mod=reactive.next(detector_input.data(),channels)*react_amount.next();
-                    if(react_mix)mix.wet=std::clamp(mix.wet+mod,0.f,1.f);
-                    if(react_output)mix.output_gain*=std::max(0.f,1.f+mod);
-                    if(react_port>=0)port_signal+=mod;
+                    float wet_delta=0,output_delta=0;
+                    for(unsigned slot=0;slot<route_count;++slot){
+                        auto& r=routes[slot];
+                        if(!r.source)continue;
+                        const float mod=r.signal.next(detector_input.data(),channels)*r.amount.next();
+                        if(r.mix)wet_delta+=mod;
+                        if(r.output)output_delta+=mod;
+                        if(r.port>=0)port_sums[slot]+=mod;
+                    }
+                    mix.wet=std::clamp(mix.wet+wet_delta,0.f,1.f);
+                    mix.output_gain*=std::max(0.f,1.f+output_delta);
                 }
                 mix_frames[j]=mix;
             }
-            if(react_source&&react_port>=0){
-                const auto value=std::clamp(base_values[react_port]+port_signal/float(n),react_min,react_max);
-                for(auto& v:voices)v->values[react_port]=value;
+            if(any_port)for(unsigned slot=0;slot<route_count;++slot){
+                const auto& r=routes[slot];
+                if(!r.source||r.port<0)continue;
+                bool seen=false;
+                for(unsigned k=0;k<slot;++k)if(routes[k].source&&routes[k].port==r.port)seen=true;
+                if(seen)continue;
+                float sum=port_sums[slot];
+                for(unsigned k=slot+1;k<route_count;++k)
+                    if(routes[k].source&&routes[k].port==r.port)sum+=port_sums[k];
+                const float value=std::clamp(base_values[r.port]+sum/float(n),r.min,r.max);
+                for(auto& v:voices)v->values[r.port]=value;
             }
             for(unsigned i=0;i<voices.size();++i){
                 auto& v=*voices[i];
@@ -224,14 +253,13 @@ void defaults(obs_data_t* settings){
     obs_data_set_default_int(settings,"lfo_target",0);
     obs_data_set_default_double(settings,"lfo_rate",1.);
     obs_data_set_default_double(settings,"lfo_depth",0.);
-    obs_data_set_default_int(settings,"react_source",0);
-    obs_data_set_default_string(settings,"react_target","output");
-    obs_data_set_default_double(settings,"react_amount",0.);
-    obs_data_set_default_int(settings,"react_shape",0);
-    obs_data_set_default_double(settings,"react_rate",1.);
-    obs_data_set_default_double(settings,"react_attack",10.);
-    obs_data_set_default_double(settings,"react_release",100.);
-    obs_data_set_default_double(settings,"react_sensitivity",0.);
+    for(unsigned slot=0;slot<route_count;++slot){
+        auto integer=[&](const char* field,int value){obs_data_set_default_int(settings,route_key(slot,field).c_str(),value);};
+        auto number=[&](const char* field,double value){obs_data_set_default_double(settings,route_key(slot,field).c_str(),value);};
+        integer("source",0);integer("shape",0);
+        obs_data_set_default_string(settings,route_key(slot,"target").c_str(),"output");
+        number("amount",0.);number("rate",1.);number("attack",10.);number("release",100.);number("sensitivity",0.);
+    }
 }
 void update(void* ptr,obs_data_t* settings){
     auto* f=static_cast<Filter*>(ptr);if(!f)return;
@@ -251,18 +279,21 @@ void update(void* ptr,obs_data_t* settings){
 }
 void* create(obs_data_t* s,obs_source_t*){auto f=std::make_unique<Filter>();update(f.get(),s);return f.release();}
 void destroy(void* p){delete static_cast<Filter*>(p);}
-void fill_targets(obs_properties_t* props,const Instance* instance,const std::string& saved=""){
-    auto* target=obs_properties_get(props,"react_target");if(!target)return;
-    obs_property_list_clear(target);
-    obs_property_list_add_string(target,"Wet / dry","mix");
-    obs_property_list_add_string(target,"Output amplitude","output");
-    bool found=saved.empty()||saved=="mix"||saved=="output";
-    if(instance)for(const auto& c:instance->controls)if(!c.integer&&!c.toggle&&c.max>c.min){
-        auto id=target_id(instance->path,instance->label,c.port);
-        obs_property_list_add_string(target,c.name.c_str(),id.c_str());
-        found=found||id==saved;
+void fill_targets(obs_properties_t* props,const Instance* instance,obs_data_t* settings=nullptr){
+    for(unsigned slot=0;slot<route_count;++slot){
+        const std::string saved=settings?obs_data_get_string(settings,route_key(slot,"target").c_str()):instance?instance->routes[slot].saved_target:"";
+        auto* target=obs_properties_get(props,route_key(slot,"target").c_str());if(!target)continue;
+        obs_property_list_clear(target);
+        obs_property_list_add_string(target,"Wet / dry","mix");
+        obs_property_list_add_string(target,"Output amplitude","output");
+        bool found=saved.empty()||saved=="mix"||saved=="output";
+        if(instance)for(const auto& c:instance->controls)if(!c.integer&&!c.toggle&&c.max>c.min){
+            auto id=target_id(instance->path,instance->label,c.port);
+            obs_property_list_add_string(target,c.name.c_str(),id.c_str());
+            found=found||id==saved;
+        }
+        if(!found)obs_property_list_add_string(target,"Unavailable saved destination (inactive)",saved.c_str());
     }
-    if(!found)obs_property_list_add_string(target,"Unavailable saved destination (inactive)",saved.c_str());
 }
 void add_controls(obs_properties_t* props,const std::vector<Control>& controls){
     for(auto& c:controls){
@@ -274,10 +305,9 @@ void add_controls(obs_properties_t* props,const std::vector<Control>& controls){
 bool modified(obs_properties_t* props,obs_property_t*,obs_data_t* settings){
     for(unsigned p=0;p<max_ports;++p)obs_properties_remove_by_name(props,key(p).c_str());
     unsigned rate=0,ch=0;Instance inspect;
-    const std::string saved=obs_data_get_string(settings,"react_target");
-    fill_targets(props,nullptr,saved);
+    fill_targets(props,nullptr,settings);
     if(format(rate,ch)&&inspect.open(settings,rate,ch)){
-        fill_targets(props,&inspect,saved);
+        fill_targets(props,&inspect,settings);
         for(auto& c:inspect.controls){
             auto k=key(c.port);
             if(c.toggle)obs_data_set_default_bool(settings,k.c_str(),c.initial!=0);
@@ -326,11 +356,13 @@ bool manual_modified(obs_properties_t* props,obs_property_t* prop,obs_data_t* se
     return modified(props,prop,settings);
 }
 bool reactive_visibility(obs_properties_t* props,obs_property_t*,obs_data_t* settings){
-    const auto source=obs_data_get_int(settings,"react_source");
-    auto show=[&](const char* key,bool yes){if(auto* p=obs_properties_get(props,key))obs_property_set_visible(p,yes);};
-    show("react_target",source!=0);show("react_amount",source!=0);
-    show("react_shape",source==1);show("react_rate",source==1);
-    show("react_attack",source>=2);show("react_release",source>=2);show("react_sensitivity",source>=3);
+    for(unsigned slot=0;slot<route_count;++slot){
+        const auto source=obs_data_get_int(settings,route_key(slot,"source").c_str());
+        auto show=[&](const char* field,bool yes){if(auto* p=obs_properties_get(props,route_key(slot,field).c_str()))obs_property_set_visible(p,yes);};
+        show("target",source!=0);show("amount",source!=0);
+        show("shape",source==1);show("rate",source==1);
+        show("attack",source>=2);show("release",source>=2);show("sensitivity",source>=3);
+    }
     return true;
 }
 obs_properties_t* properties(void* p){
@@ -360,21 +392,25 @@ obs_properties_t* properties(void* p){
     auto* output=obs_properties_add_float_slider(props,"output_db","Output gain",-24.,24.,.1);
     obs_property_float_set_suffix(input," dB");
     obs_property_float_set_suffix(output," dB");
-    auto* reactive=obs_properties_add_list(props,"react_source","Reactive source",OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_INT);
     const char* sources[]={"Off","LFO","Input envelope","Bass energy","Mid energy","Treble energy"};
-    for(int i=0;i<6;++i)obs_property_list_add_int(reactive,sources[i],i);
-    obs_properties_add_list(props,"react_target","Reactive destination",OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_STRING);
-    fill_targets(props,nullptr);
-    auto* amount=obs_properties_add_float(props,"react_amount","Reactive amount",-10000,10000,.01);
-    obs_property_set_long_description(amount,"Signed modulation in parameter units. Wet/dry and output amplitude clamp amount to ±1. Effect parameters clamp to their declared host range.");
-    auto* shape=obs_properties_add_list(props,"react_shape","Reactive LFO waveform",OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_INT);
     const char* shapes[]={"Sine","Triangle","Square","Saw"};
-    for(int i=0;i<4;++i)obs_property_list_add_int(shape,shapes[i],i);
-    obs_properties_add_float_slider(props,"react_rate","Reactive LFO rate (Hz)",.05,20,.05);
-    obs_properties_add_float_slider(props,"react_attack","Reactive attack (ms)",1,200,1);
-    obs_properties_add_float_slider(props,"react_release","Reactive release (ms)",10,2000,10);
-    obs_properties_add_float_slider(props,"react_sensitivity","Band sensitivity (dB)",-24,24,.1);
-    obs_property_set_modified_callback(reactive,reactive_visibility);
+    for(unsigned slot=0;slot<route_count;++slot){
+        const std::string title="Route "+std::to_string(slot+1)+" · ";
+        auto field=[&](const char* name){return route_key(slot,name);};
+        auto* reactive=obs_properties_add_list(props,field("source").c_str(),(title+"Source").c_str(),OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_INT);
+        for(int i=0;i<6;++i)obs_property_list_add_int(reactive,sources[i],i);
+        obs_properties_add_list(props,field("target").c_str(),(title+"Destination").c_str(),OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_STRING);
+        auto* amount=obs_properties_add_float(props,field("amount").c_str(),(title+"Amount").c_str(),-10000,10000,.01);
+        obs_property_set_long_description(amount,"Signed parameter units. Mix/output amount is bounded to ±1. Contributions to the same destination are summed before clamping.");
+        auto* shape=obs_properties_add_list(props,field("shape").c_str(),(title+"Waveform").c_str(),OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_INT);
+        for(int i=0;i<4;++i)obs_property_list_add_int(shape,shapes[i],i);
+        obs_properties_add_float_slider(props,field("rate").c_str(),(title+"Rate (Hz)").c_str(),.05,20,.05);
+        obs_properties_add_float_slider(props,field("attack").c_str(),(title+"Attack (ms)").c_str(),1,200,1);
+        obs_properties_add_float_slider(props,field("release").c_str(),(title+"Release (ms)").c_str(),10,2000,10);
+        obs_properties_add_float_slider(props,field("sensitivity").c_str(),(title+"Sensitivity (dB)").c_str(),-24,24,.1);
+        obs_property_set_modified_callback(reactive,reactive_visibility);
+    }
+    fill_targets(props,nullptr);
     auto* lfo=obs_properties_add_list(props,"lfo_target","LFO target",OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_INT);
     obs_property_list_add_int(lfo,"Off",0);
     obs_property_list_add_int(lfo,"Wet / dry",1);
@@ -387,7 +423,7 @@ obs_properties_t* properties(void* p){
     obs_property_set_modified_callback(path,manual_modified);
     obs_property_set_modified_callback(label,manual_modified);
     if(p){auto* f=static_cast<Filter*>(p);std::lock_guard lock(f->mutex);
-        if(f->active){add_controls(props,f->active->controls);fill_targets(props,f->active.get(),f->active->saved_react_target);}}
+        if(f->active){add_controls(props,f->active->controls);fill_targets(props,f->active.get());}}
     return props;
 }
 obs_audio_data* process(void* p,obs_audio_data* audio){
