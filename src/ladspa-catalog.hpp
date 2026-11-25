@@ -8,11 +8,15 @@
 #include <sstream>
 #include <filesystem>
 #include <vector>
+#include "framework/dsp/ladspa_controls.hpp"
 
 namespace hyperdsp {
+struct ControlHint {unsigned port;std::string name;LADSPA_PortRangeHint hint;};
 struct CatalogEntry {
     std::string path,label,name,maker,category;
     int channels;
+    std::vector<ControlHint> controls;
+    bool controls_complete=false;
     std::string id() const { return path+"\t"+label; }
 };
 using Catalog=std::vector<CatalogEntry>;
@@ -53,6 +57,22 @@ inline Catalog read_catalog(const std::string& path){
                 CatalogEntry e{obs_data_get_string(item,"path"),obs_data_get_string(item,"label"),
                     obs_data_get_string(item,"name"),obs_data_get_string(item,"maker"),
                     obs_data_get_string(item,"category"),int(obs_data_get_int(item,"channels"))};
+                if(auto* controls=obs_data_get_array(item,"controls")){
+                    const auto count=obs_data_array_count(controls);
+                    bool valid=count<=256;
+                    for(size_t j=0;j<std::min<size_t>(count,256);++j){
+                        auto* c=obs_data_array_item(controls,j);
+                        auto port=obs_data_get_int(c,"port"),flags=obs_data_get_int(c,"flags");
+                        auto lo=obs_data_get_double(c,"lower"),hi=obs_data_get_double(c,"upper");
+                        if(port>=0&&port<256&&flags>=0&&flags<=65535&&std::isfinite(float(lo))&&std::isfinite(float(hi))&&
+                            std::none_of(e.controls.begin(),e.controls.end(),[&](auto& h){return h.port==port;}))
+                            e.controls.push_back({unsigned(port),obs_data_get_string(c,"name"),{LADSPA_PortRangeHintDescriptor(flags),float(lo),float(hi)}});
+                        else valid=false;
+                        obs_data_release(c);
+                    }
+                    e.controls_complete=valid&&obs_data_get_bool(item,"controls_complete");
+                    obs_data_array_release(controls);
+                }
                 if(!e.path.empty()&&e.path.front()=='/'&&!e.label.empty()&&!e.name.empty()&&
                     e.path.find('\t')==std::string::npos&&e.label.find('\t')==std::string::npos&&
                     (e.channels==1||e.channels==2))entries.push_back(std::move(e));

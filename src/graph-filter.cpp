@@ -1,5 +1,6 @@
 #include <obs-module.h>
 #include <jansson.h>
+#include "ladspa-catalog.hpp"
 #include "framework/dsp/effect_graph.hpp"
 #include <mutex>
 #include <cstring>
@@ -40,8 +41,8 @@ bool parse(const std::string& raw,GraphSpec& spec,std::string& error){
     json_array_foreach(nodes,index,n){
         auto* effect=json_object_get(n,"effect");auto* inputs=json_object_get(n,"inputs");
         auto* params=json_object_get(n,"params");
-        if(!keys(n,{"effect","inputs","params"})||!json_is_string(effect)||json_string_length(effect)>128||
-            !json_is_array(inputs)||json_array_size(inputs)>8||(params&&(!json_is_object(params)||json_object_size(params)>24))){
+        if(!keys(n,{"effect","inputs","params"})||!json_is_string(effect)||json_string_length(effect)>4096||
+            !json_is_array(inputs)||json_array_size(inputs)>8||(params&&(!json_is_object(params)||json_object_size(params)>259))){
             error="Invalid node "+std::to_string(index);return false;
         }
         GraphNode node;node.effect=json_string_value(effect);
@@ -77,7 +78,12 @@ void update(void* ptr,obs_data_t* settings){
     }
     GraphSpec spec;std::string error;
     std::unique_ptr<PreparedGraph> next;
-    try{if(parse(raw,spec,error))next=PreparedGraph::prepare(spec,rate,channels,error);}
+    try{if(parse(raw,spec,error)){
+        std::vector<std::string> allowed;
+        if(std::any_of(spec.nodes.begin(),spec.nodes.end(),[](auto& n){return n.effect.starts_with("ladspa:");}))
+            for(auto& e:read_catalog())allowed.push_back("ladspa:"+e.id());
+        next=PreparedGraph::prepare(spec,rate,channels,error,allowed);
+    }}
     catch(const std::exception& ex){error=ex.what();}
     if(!next){
         {std::lock_guard lock(f->mutex);f->error=error;}
@@ -95,11 +101,11 @@ const char* name(void*){return "HyperDSP Graph";}
 obs_properties_t* properties(void* p){
     auto* props=obs_properties_create();
     auto* json=obs_properties_add_text(props,"graph_json","Effect graph (schema 1)",OBS_TEXT_MULTILINE);
-    std::string status="All native effects and gain nodes. Invalid edits retain the previous active graph in this session.";
+    std::string status="All native effects, gain and explicitly scanned trusted LADSPA nodes. External latency is unknown. Invalid edits retain the previous active graph in this session.";
     if(p){
         auto* f=static_cast<Source*>(p);std::lock_guard lock(f->mutex);
         if(!f->error.empty())status+=" Last error: "+f->error;
-        else if(f->active)status+=" Active latency: "+std::to_string(f->active->latency())+" samples.";
+        else if(f->active)status+=" Known fixed latency: "+std::to_string(f->active->latency())+" samples."+(f->active->latency_known()?"":" Additional LADSPA latency is unknown and uncompensated.");
     }
     obs_property_set_long_description(json,status.c_str());return props;
 }

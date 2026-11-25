@@ -25,13 +25,26 @@ template<size_t N> void choice_parameter(obs_data_array_t* items,const char* key
     obs_data_set_array(p,"choices",choices);obs_data_array_release(choices);
     obs_data_array_push_back(items,p);obs_data_release(p);
 }
-void graph_metadata(obs_data_t* item,const hyperdsp::EffectEntry& e){
+void graph_metadata(obs_data_t* item,const hyperdsp::EffectEntry& e,unsigned rate){
     using namespace hyperdsp;
-    const bool supported=e.format=="native";
+    const bool supported=e.format=="native"||e.format=="ladspa";
+    obs_data_set_bool(item,"latency_known",e.format=="native");
     obs_data_set_bool(item,"graph_supported",supported);
     if(!supported)return;
     auto* params=obs_data_array_create();
-    if(e.source=="hyperdsp_color_filter"){
+    if(e.format=="ladspa"){
+        obs_data_set_bool(item,"controls_complete",e.controls_complete);
+        number_parameter(params,"mix","Wet / dry",0,1,.01,1,"");
+        number_parameter(params,"input_db","Input gain",-24,24,.1,0," dB");
+        number_parameter(params,"output_db","Output gain",-24,24,.1,0," dB");
+        for(auto& h:e.controls){
+            const auto c=control_from_hint(h.port,h.name,h.hint,rate);
+            auto initial=c.integer||c.toggle?std::clamp(std::round(c.initial),c.min,c.max):c.initial;
+            auto k=key(c.port);
+            if(c.toggle){const unsigned choices[]={0,1};choice_parameter(params,k.c_str(),c.name.c_str(),unsigned(initial),choices);}
+            else number_parameter(params,k.c_str(),c.name.c_str(),c.min,c.max,c.integer?1:.001,initial,"");
+        }
+    }else if(e.source=="hyperdsp_color_filter"){
         parameter_list(params,ColorSettings{},color_parameters);
         choice_parameter(params,"oversample","Oversampling",1,oversampling_choices);
     }else if(e.source=="hyperdsp_spectral_filter"){
@@ -72,12 +85,12 @@ std::string default_catalog(){
 }
 int main(int argc,char** argv){
     std::string path=default_catalog(),query,format;
-    unsigned channels=2;
+    unsigned channels=2,rate=48000;
     bool json=false;
     for(int i=1;i<argc;++i){
         std::string_view arg=argv[i];
         if(arg=="--help"){
-            std::cout<<"Usage: hyperdsp-effects [--catalog FILE] [--search WORDS] [--format native|ladspa] [--channels 1..8] [--json]\n";
+            std::cout<<"Usage: hyperdsp-effects [--catalog FILE] [--search WORDS] [--format native|ladspa] [--channels 1..8] [--rate 8000..192000] [--json]\n";
             return 0;
         }
         if(arg=="--json"){json=true;continue;}
@@ -89,6 +102,9 @@ int main(int argc,char** argv){
         else if(arg=="--channels"){
             auto [end,error]=std::from_chars(value.data(),value.data()+value.size(),channels);
             if(error!=std::errc{}||end!=value.data()+value.size()||channels<1||channels>8)return 2;
+        }else if(arg=="--rate"){
+            auto [end,error]=std::from_chars(value.data(),value.data()+value.size(),rate);
+            if(error!=std::errc{}||end!=value.data()+value.size()||rate<8000||rate>192000)return 2;
         }else{std::cerr<<"Invalid option: "<<arg<<"\n";return 2;}
     }
     auto entries=hyperdsp::search_effects(hyperdsp::effect_library(hyperdsp::read_catalog(path),channels),query,format);
@@ -98,7 +114,7 @@ int main(int argc,char** argv){
         std::cout<<entries.size()<<" entries (metadata only)\n";return 0;
     }
     auto* root=obs_data_create();auto* items=obs_data_array_create();
-    obs_data_set_int(root,"schema",1);obs_data_set_int(root,"channels",channels);
+    obs_data_set_int(root,"schema",1);obs_data_set_int(root,"channels",channels);obs_data_set_int(root,"sample_rate",rate);
     for(auto& e:entries){
         auto* item=obs_data_create();
         auto field=[&](const char* key,const std::string& value){obs_data_set_string(item,key,value.c_str());};
@@ -107,7 +123,7 @@ int main(int argc,char** argv){
         obs_data_set_bool(item,"compatible",e.compatible);
         if(e.format=="native"){field("mode_key",e.mode_key);obs_data_set_int(item,"mode",e.mode);}
         else{field("path",e.path);field("label",e.label);obs_data_set_int(item,"channels",e.channels);}
-        graph_metadata(item,e);
+        graph_metadata(item,e,rate);
         obs_data_array_push_back(items,item);obs_data_release(item);
     }
     obs_data_set_array(root,"effects",items);obs_data_array_release(items);

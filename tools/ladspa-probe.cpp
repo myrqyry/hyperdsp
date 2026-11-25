@@ -1,6 +1,7 @@
 #include <ladspa.h>
 #include <dlfcn.h>
 #include <cstdio>
+#include <cmath>
 #include <string>
 static std::string clean(const char* s) {
     std::string out=s?s:"";
@@ -24,7 +25,16 @@ int main(int argc,char** argv) {
             if(LADSPA_IS_PORT_AUDIO(t)){if(LADSPA_IS_PORT_INPUT(t))++in;else if(LADSPA_IS_PORT_OUTPUT(t))++out;}
         }
         if(in!=out||(in!=1&&in!=2))continue;
-        std::printf("%s\t%s\t%s\t%u\n",clean(d->Label).c_str(),clean(d->Name).c_str(),clean(d->Maker).c_str(),in);
+        unsigned count=0;
+        for(unsigned p=0;p<d->PortCount;++p)
+            if(LADSPA_IS_PORT_CONTROL(d->PortDescriptors[p])&&LADSPA_IS_PORT_INPUT(d->PortDescriptors[p]))++count;
+        std::printf("%s\t%s\t%s\t%u\t%u\n",clean(d->Label).c_str(),clean(d->Name).c_str(),clean(d->Maker).c_str(),in,count);
+        for(unsigned p=0;p<d->PortCount;++p){
+            if(!LADSPA_IS_PORT_CONTROL(d->PortDescriptors[p])||!LADSPA_IS_PORT_INPUT(d->PortDescriptors[p]))continue;
+            auto h=d->PortRangeHints[p];
+            std::printf("C\t%u\t%s\t%lu\t%.9g\t%.9g\n",p,clean(d->PortNames[p]).c_str(),
+                static_cast<unsigned long>(h.HintDescriptor),double(h.LowerBound),double(h.UpperBound));
+        }
     }
     dlclose(lib);
 }

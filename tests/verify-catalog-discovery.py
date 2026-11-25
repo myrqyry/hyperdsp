@@ -19,6 +19,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert data["schema"]==1 and len(data["effects"])==2, result.stdout
     assert {e["label"] for e in data["effects"]}=={"amp_mono","amp_stereo"}
     assert not data["failed"]
+    assert all(e["controls"][0]["port"]==0 and e["controls_complete"] for e in data["effects"])
     # Explicit path arguments override environment, and an empty scan is valid.
     empty=root/"empty";empty.mkdir()
     subprocess.run([sys.executable,str(scanner),"--probe",str(probe),"--output",str(output),str(empty)],env=env,check=True)

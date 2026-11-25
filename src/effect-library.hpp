@@ -75,6 +75,8 @@ struct EffectEntry {
     std::string id,name,category,description,format,source,mode_key,path,label,maker;
     int mode=0,channels=0;
     bool compatible=false;
+    std::vector<ControlHint> controls;
+    bool controls_complete=false;
 };
 // Metadata-only inventory. No native libraries opened by this function.
 inline std::vector<EffectEntry> effect_library(const Catalog& catalog,unsigned channels){
@@ -91,7 +93,7 @@ inline std::vector<EffectEntry> effect_library(const Catalog& catalog,unsigned c
         if(!ids.insert(e.id).second)continue;
         e.name=plugin.name;e.category=plugin.category.empty()?"Other":plugin.category;
         e.format="ladspa";e.source="hyperdsp_ladspa_filter";e.path=plugin.path;e.label=plugin.label;
-        e.maker=plugin.maker;e.channels=plugin.channels;
+        e.maker=plugin.maker;e.channels=plugin.channels;e.controls=plugin.controls;e.controls_complete=plugin.controls_complete;
         e.description="Scanned descriptor; processing not individually qualified";
         std::error_code ec;
         e.compatible=channels>=1&&channels<=8&&(plugin.channels==1||channels==2)&&std::filesystem::is_regular_file(e.path,ec);

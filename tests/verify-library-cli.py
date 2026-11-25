@@ -10,12 +10,16 @@ result=run()
 assert result["schema"]==1 and len(result["effects"])==40
 assert sum(e["format"]=="native" for e in result["effects"])==38
 assert len({e["id"] for e in result["effects"]})==40
-assert sum(e["graph_supported"] for e in result["effects"])==38
+assert sum(e["graph_supported"] for e in result["effects"])==40
 color=next(e for e in result["effects"] if e["id"]=="native:hyperdsp_color_filter:3")
 params={p["key"]:p for p in color["parameters"]}
 assert params["drive"]["min"]==-24 and params["drive"]["max"]==36 and params["drive"]["default"]==0
 assert [c["value"] for c in params["oversample"]["choices"]]==[1,2,4]
 assert result["graph_utilities"][0]["id"]=="gain"
+amp=next(e for e in result["effects"] if e.get("label")=="amp_mono")
+assert amp["controls_complete"] and amp["latency_known"] is False
+assert next(p for p in amp["parameters"] if p["key"]=="port_0")["default"]==1
+assert run("--rate","96000")["sample_rate"]==96000
 for effect in result["effects"]:
     if effect["graph_supported"]:
         assert effect["parameters"] and len({p["key"] for p in effect["parameters"]})==len(effect["parameters"])

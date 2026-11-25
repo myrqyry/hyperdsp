@@ -21,7 +21,7 @@ Requires a C++20 compiler, CMake, OBS development headers, libobs, Jansson devel
 
 ## Effect graph runtime
 
-**HyperDSP Graph** is an initial executable serial/parallel effect graph filter. Its versioned JSON definition is editable in OBS filter properties; the graphical Effect Builder is future work. The graph supports all 38 native processing modes across eight families, and a gain/weighted-sum utility. External LADSPA effects remain available as individual filters but are not yet graph nodes.
+**HyperDSP Graph** is an initial executable serial/parallel effect graph filter. Its versioned JSON definition is editable in OBS filter properties; the graphical Effect Builder is future work. The graph supports all 38 native processing modes across eight families, and a gain/weighted-sum utility. Scanned compatible LADSPA effects can also be used as graph nodes or standalone filters. External native code is trusted code, not sandboxed.
 
 The graph has a single audio input (source index -1), up to 16 nodes and 32 weighted edges, and a selected output. It rejects cycles, disconnected nodes, unsupported effects, non-finite/out-of-range parameters and invalid connections. Parallel paths are aligned to the greatest fixed algorithmic latency at each merge, including Color oversampling and Spectral FFT buffering. Valid graphs are prepared off the audio callback and swapped in; an invalid edit retains the previous active graph for that session. The callback processes bounded chunks with preallocated buffers. A valid replacement resets graph state, and an update collision can briefly bypass; there is no crossfade or scene-wide timestamp alignment.
 
@@ -40,7 +40,7 @@ Example: parallel saturated and dry branches. Paste the JSON into the graph filt
 }
 ```
 
-Shared native parameter definitions drive OBS controls, graph validation and the effect-library JSON metadata. See [graph contract and verification](docs/effect-graph.md) for limitations and schema.
+Shared native parameter definitions drive OBS controls, graph validation and the effect-library JSON metadata. LADSPA nodes use the same host engine as the standalone filter and validate live port hints before activation. Use the catalog ID from the JSON inventory, with numeric port_N parameters and optional mix/input_db/output_db. Only locally scanned IDs are accepted. LADSPA latency is unknown and not compensated; native fixed-latency alignment remains active. See [graph contract and verification](docs/effect-graph.md) for limitations and schema.
 
 ## Native filter
 
@@ -139,7 +139,7 @@ build/hyperdsp-effects --search "pitch"
 build/hyperdsp-effects --format ladspa --channels 1 --json
 ```
 
-Search accepts multiple words in any order, and the versioned JSON inventory includes native source/mode keys or local LADSPA path/label, category, description, format, maker and layout/path eligibility. A missing external catalog still leaves native effects discoverable. The tool is installed under `tools/`. It reports metadata only: eligibility is not audio qualification, and a local library path is not a portable effect identifier. The unified graphical library is not yet implemented. The graph runtime supports all native modes and a gain utility; JSON includes graph support flags and parameter metadata. See [effect library contract](docs/effect-library.md).
+Search accepts multiple words in any order, and the versioned JSON inventory includes native source/mode keys or local LADSPA path/label, category, description, format, maker and layout/path eligibility. A missing external catalog still leaves native effects discoverable. The tool is installed under `tools/`. It reports metadata only: eligibility is not audio qualification, and a local library path is not a portable effect identifier. The unified graphical library is not yet implemented. The graph runtime supports native modes, gain and scanned LADSPA effects. JSON includes graph support flags, parameter metadata, and external latency/metadata completeness flags. Use --rate to resolve sample-rate-dependent port hints (default 48000). Rescan older catalogs to populate port metadata. See [effect library contract](docs/effect-library.md).
 
 ### Find and scan external effects
 

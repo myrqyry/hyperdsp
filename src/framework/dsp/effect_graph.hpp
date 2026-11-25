@@ -2,6 +2,7 @@
 #include "parameter_schema.hpp"
 #include "fractional_delay.hpp"
 #include "engines/mic_dsp_engine.hpp"
+#include "ladspa_engine.hpp"
 #include <memory>
 #include <variant>
 #include <functional>
@@ -26,7 +27,7 @@ class PreparedGraph {
         }
     };
     struct Node {
-        std::variant<float,std::unique_ptr<Color>,std::unique_ptr<Spectral>,std::unique_ptr<NativeFilter>,std::unique_ptr<Dynamics>,std::unique_ptr<TimeEffect>,std::unique_ptr<Space>,std::unique_ptr<Formant>,std::unique_ptr<MicNode>> engine{1.f};
+        std::variant<float,std::unique_ptr<Color>,std::unique_ptr<Spectral>,std::unique_ptr<NativeFilter>,std::unique_ptr<Dynamics>,std::unique_ptr<TimeEffect>,std::unique_ptr<Space>,std::unique_ptr<Formant>,std::unique_ptr<MicNode>,std::unique_ptr<LadspaEngine>> engine{1.f};
         std::vector<Edge> inputs;
         std::vector<float> audio;
         unsigned latency=0;
@@ -35,6 +36,7 @@ class PreparedGraph {
     std::vector<unsigned> order_;
     unsigned channels_=0,latency_=0;
     int output_=-1;
+    bool unknown_latency_=false;
     static bool mode(std::string_view id,std::string_view prefix,int& value,int maximum=5){
         if(!id.starts_with(prefix))return false;
         id.remove_prefix(prefix.size());
@@ -43,7 +45,8 @@ class PreparedGraph {
     }
 public:
     unsigned latency()const{return latency_;}
-    static std::unique_ptr<PreparedGraph> prepare(const GraphSpec& s,unsigned rate,unsigned channels,std::string& error){
+    bool latency_known()const{return !unknown_latency_;}
+    static std::unique_ptr<PreparedGraph> prepare(const GraphSpec& s,unsigned rate,unsigned channels,std::string& error,const std::vector<std::string>& allowed={}){
         error.clear();
         auto fail=[&](std::string why)->std::unique_ptr<PreparedGraph>{error=std::move(why);return nullptr;};
         if(rate<8000||rate>192000||channels<1||channels>8)return fail("Unsupported audio format");
@@ -54,7 +57,7 @@ public:
         unsigned edges=0;
         for(int i=0;i<count;++i){
             auto& n=s.nodes[i];
-            if(n.inputs.empty()||n.inputs.size()>8||n.params.size()>24)return fail("Invalid node input or parameter count");
+            if(n.inputs.empty()||n.inputs.size()>8||n.params.size()>(n.effect.starts_with("ladspa:")?259:24))return fail("Invalid node input or parameter count");
             edges+=n.inputs.size();if(edges>32)return fail("At most 32 edges");
             for(auto& e:n.inputs)if(e.source<-1||e.source>=count||!std::isfinite(e.weight)||std::abs(e.weight)>4)return fail("Invalid edge");
         }
@@ -129,6 +132,33 @@ public:
                     else if(!assign_parameter(settings,formant_parameters,k,v))return fail("Invalid Formant parameter: "+k);
                 }
                 auto engine=std::make_unique<Formant>();engine->reset(rate,settings);n.engine=std::move(engine);
+            }else if(spec.effect.starts_with("ladspa:")){
+                if(std::find(allowed.begin(),allowed.end(),spec.effect)==allowed.end())
+                    return fail("LADSPA effect not in the local scanned catalog");
+                auto id=spec.effect.substr(7);auto sep=id.find('\t');
+                if(sep==std::string::npos||id.find('\t',sep+1)!=std::string::npos)return fail("Invalid LADSPA identity");
+                auto engine=std::make_unique<LadspaEngine>();
+                std::string parameter_error;
+                if(!engine->open(id.substr(0,sep),id.substr(sep+1),rate,channels,[&](auto& e){
+                    for(auto& c:e.controls)e.set_control(c,c.integer||c.toggle?std::clamp(std::round(c.initial),c.min,c.max):c.initial);
+                    double wet=1,input=0,output=0;
+                    for(auto& [k,v]:spec.params){
+                        if(k=="mix"||k=="input_db"||k=="output_db"){
+                            double lo=k=="mix"?0:-24,hi=k=="mix"?1:24;
+                            if(!std::isfinite(v)||v<lo||v>hi){parameter_error=k;return false;}
+                            (k=="mix"?wet:k=="input_db"?input:output)=v;
+                        }else{
+                            auto c=std::find_if(e.controls.begin(),e.controls.end(),[&](auto& c){return key(c.port)==k;});
+                            if(c==e.controls.end()||!std::isfinite(v)||v<c->min||v>c->max||
+                               ((c->integer||c->toggle)&&std::round(v)!=v)){parameter_error=k;return false;}
+                            e.set_control(*c,float(v));
+                        }
+                    }
+                    e.modulation.reset(rate,MixSettings::from(wet,input,output));return true;
+                }))return fail(parameter_error.empty()?"Cannot instantiate compatible LADSPA effect":"Invalid LADSPA parameter: "+parameter_error);
+                n.engine=std::move(engine);
+                g->unknown_latency_=true;
+                // LADSPA has no universal latency contract. Do not invent latency.
             }else return fail("Unsupported graph effect: "+spec.effect);
             n.latency=input_latency+own_latency;
             n.audio.resize(size_t(channels)*chunk);
@@ -181,8 +211,8 @@ public:
 class GraphRuntime {
     std::unique_ptr<PreparedGraph> active_;
 public:
-    bool replace(const GraphSpec& s,unsigned rate,unsigned channels,std::string& error){
-        auto next=PreparedGraph::prepare(s,rate,channels,error);
+    bool replace(const GraphSpec& s,unsigned rate,unsigned channels,std::string& error,const std::vector<std::string>& allowed={}){
+        auto next=PreparedGraph::prepare(s,rate,channels,error,allowed);
         if(!next)return false;
         active_=std::move(next);return true;
     }

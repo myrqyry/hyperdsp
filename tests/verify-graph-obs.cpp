@@ -69,7 +69,7 @@ static void stream(obs_source_t* source, int rounds, double hz) {
     }
 }
 int main(int argc,char**argv){
-    if(argc!=3||!obs_startup("en-US",nullptr,nullptr))return 2;
+    if((argc!=3&&argc!=4)||!obs_startup("en-US",nullptr,nullptr))return 2;
     obs_audio_info ai{};ai.samples_per_sec=48000;ai.speakers=SPEAKERS_STEREO;
     if(!obs_reset_audio(&ai))return 3;
     obs_module_t* module=nullptr;
@@ -108,7 +108,24 @@ int main(int argc,char**argv){
     obs_data_set_string(settings,"graph_json",R"({"schema":1,"schema":1,"nodes":[],"output":-1})");obs_source_update(filter,settings);auto duplicate=measure();
     obs_data_set_string(settings,"graph_json",R"({"schema":1,"nodes":[42],"output":0})");obs_source_update(filter,settings);auto malformed=measure();
     obs_data_set_string(settings,"graph_json",R"({"schema":1,"nodes":[],"output":-1})");obs_source_update(filter,settings);auto bypass=measure();
-    bool ok=mixed_ok&&controls&&std::abs(a[0]-.071046)<.002&&std::abs(a[1]/a[0]-.4)<.001&&b[0]<1e-5&&c[0]<1e-5&&d[0]<1e-5&&duplicate[0]<1e-5&&malformed[0]<1e-5&&std::abs(bypass[0]-.282843)<.002;
+    bool external_ok=true;
+    if(argc==4){
+        const std::string id=std::string("ladspa:")+argv[3]+"\tamp_mono";
+        auto* id_data=obs_data_create();obs_data_set_string(id_data,"effect",id.c_str());
+        std::string node=obs_data_get_json(id_data);obs_data_release(id_data);node.pop_back();
+        node+=R"(,"params":{"port_0":0.5},"inputs":[{"source":-1,"weight":1}]})";
+        std::string graph=R"({"schema":1,"nodes":[)"+node+
+            R"(,{"effect":"gain","params":{"gain_db":-6},"inputs":[{"source":0,"weight":1}]}],"output":1})";
+        obs_data_set_string(settings,"graph_json",graph.c_str());obs_source_update(filter,settings);auto external=measure();
+        auto unavailable=graph;auto pos=unavailable.find("amp_mono");unavailable.replace(pos,8,"unscanned");
+        obs_data_set_string(settings,"graph_json",unavailable.c_str());obs_source_update(filter,settings);auto retained=measure();
+        auto bad=graph;pos=bad.find("port_0");bad.replace(pos,6,"port_999");
+        obs_data_set_string(settings,"graph_json",bad.c_str());obs_source_update(filter,settings);auto rejected=measure();
+        external_ok=std::abs(external[0]-.0708786)<.002&&std::abs(external[1]/external[0]-.4)<.002&&
+            std::abs(retained[0]-external[0])<.002&&std::abs(rejected[0]-external[0])<.002;
+        std::printf("LADSPA_GRAPH_OBS serial=%g right=%g unscanned_retained=%g invalid_retained=%g pass=%d\n",external[0],external[1],retained[0],rejected[0],external_ok);
+    }
+    bool ok=external_ok&&mixed_ok&&controls&&std::abs(a[0]-.071046)<.002&&std::abs(a[1]/a[0]-.4)<.001&&b[0]<1e-5&&c[0]<1e-5&&d[0]<1e-5&&duplicate[0]<1e-5&&malformed[0]<1e-5&&std::abs(bypass[0]-.282843)<.002;
     std::printf("GRAPH_OBS serial=%g parallel=%g invalid=%g invalid_param=%g bypass=%g pass=%d\n",a[0],b[0],c[0],d[0],bypass[0],ok);
     obs_set_output_source(1,nullptr);obs_source_dec_active(source);obs_source_filter_remove(source,filter);
     obs_source_release(filter);obs_source_release(source);obs_data_release(settings);obs_shutdown();return ok?0:1;

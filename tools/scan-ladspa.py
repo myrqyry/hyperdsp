@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import sysconfig
+import math
 
 def category(name):
     groups = {
@@ -49,13 +50,33 @@ def main():
         if proc.returncode:
             failed.append(str(path))
             continue
+        current = None
+        expected = None
+        def finish():
+            if current is not None and expected is not None:
+                current["controls_complete"] = len(current["controls"]) == expected
         for line in proc.stdout.splitlines():
             parts = line.split("\t")
-            if len(parts)!=4 or parts[3] not in ("1","2") or not parts[0] or not parts[1]:
+            if len(parts)==6 and parts[0]=="C" and current is not None and expected is not None:
+                try:
+                    port, flags, lo, hi = int(parts[1]), int(parts[3]), float(parts[4]), float(parts[5])
+                    if (0<=port<256 and 0<=flags<=65535 and math.isfinite(lo) and math.isfinite(hi)
+                        and len(current["controls"])<256 and not any(c["port"]==port for c in current["controls"])):
+                        current["controls"].append(dict(port=port,name=parts[2] or "Control",flags=flags,lower=lo,upper=hi))
+                except ValueError:
+                    pass
                 continue
-            label,name,maker,channels = parts
-            effects.append(dict(path=str(path), label=label, name=name, maker=maker,
-                                channels=int(channels), category=category(name+" "+label)))
+            finish()
+            current, expected = None, None
+            if len(parts) not in (4,5) or parts[3] not in ("1","2") or not parts[0] or not parts[1]:
+                continue
+            label,name,maker,channels = parts[:4]
+            current=dict(path=str(path), label=label, name=name, maker=maker,
+                         channels=int(channels), category=category(name+" "+label))
+            if len(parts)==5 and parts[4].isdigit() and int(parts[4])<=256:
+                expected=int(parts[4]);current["controls"]=[]
+            effects.append(current)
+        finish()
     effects.sort(key=lambda e: (e["name"].casefold(), e["path"], e["label"]))
     args.output.parent.mkdir(parents=True,exist_ok=True)
     with tempfile.NamedTemporaryFile(mode="w",dir=args.output.parent,delete=False) as f:
