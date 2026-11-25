@@ -11,7 +11,7 @@ Standalone deterministic audio effects and DSP hosting for OBS Studio, the audio
 | Live Latent Lab.Sound | Audio AI/ML and derived signals |
 | Live Latent Lab.Sight | Video AI/ML and derived signals |
 
-Both deterministic effect plugins may optionally consume data published by either Lab plugin without owning inference or requiring its installation. HyperDSP must keep working independently. Future signal consumers should reuse the existing versioned OBS interfaces, read outside the real-time audio callback, and safely handle missing or stale inputs. Signal integration in HyperDSP is planned, not implemented.
+Both deterministic effect plugins may optionally consume data published by either Lab plugin without owning inference or requiring its installation. HyperDSP must keep working independently. Future signal consumers should reuse the existing versioned OBS interfaces, read outside the real-time audio callback, and safely handle missing or stale inputs. HyperDSP already consumes optional Sound classification and Sight motion/hand signals via these versioned interfaces.
 
 The first verified target is the microphone coloration filter: dynamic, condenser, ribbon, telephone, vintage radio, tape and dry bypass, with spectral sweep and resonance controls. These are procedural tones, not measured microphone reproductions.
 
@@ -77,7 +77,7 @@ The bank uses three parallel normalized TPT band-pass sections, with independent
 
 ## LADSPA filter
 
-Add **HyperDSP LADSPA** to an audio source. Search the effect catalog by name, label or maker, narrow by category, and choose an effect from the native OBS properties. Switching catalog effects clears the previous effect's port values so the new effect starts at its own defaults. Manual trusted library path and exact label (for example, `/usr/lib/ladspa/amp.so` and `amp_stereo`) remain available. The filter generates numeric and toggle controls from port metadata. Mono effects use independent instances per OBS audio channel; stereo effects require a stereo OBS layout. Only equal-input/output mono or stereo effects declaring hard-real-time capability are accepted. Unsupported configurations, missing libraries and invalid labels bypass audio.
+Add **HyperDSP LADSPA** to an audio source. Search the effect catalog using any combination of name, label, maker, category, library filename, or mono/stereo (word order does not matter), narrow by category, and choose an effect from the native OBS properties. Switching catalog effects clears the previous effect's port values so the new effect starts at its own defaults. Manual trusted library path and exact label (for example, `/usr/lib/ladspa/amp.so` and `amp_stereo`) remain available. The filter generates numeric and toggle controls from port metadata. Mono effects use independent instances per OBS audio channel; stereo effects require a stereo OBS layout. Only equal-input/output mono or stereo effects declaring hard-real-time capability are accepted. Unsupported configurations, missing libraries and invalid labels bypass audio.
 
 Use `analyseplugin /path/to/plugin.so` to see available labels. Only load trusted plugins: this backend executes native code in the OBS process, not a sandbox. The initial host does not provide preset import/export, latency compensation, sidechains, control-output meters or custom plugin interfaces. Categories are inferred from descriptor names/labels, not authoritative plugin metadata.
 
@@ -107,17 +107,30 @@ Both backends accept Sight motion energy, hand X, hand Y and pinch closeness thr
 
 The adapter validates procedure version, buffer size, sequence, dimensions, kind, bounds and availability as appropriate to each contract. Duplicate, disabled, missing or unavailable tracking channels contribute zero. Sight snapshots are requested with a 500 ms maximum age; the shared worker also expires local snapshots after 500 ms and the matrix smooths changes over 10 ms. Named tracking channels follow Sight's own naming semantics (not UUIDs). No producer is rendered or started by HyperDSP. See [Sight interop verification](docs/sight-interop.md).
 
-### Refresh the catalog
+### Find and scan external effects
 
-After building, run:
+In **HyperDSP LADSPA** properties, choose **Scan installed effects**, then **Reload catalog** when the scan finishes. Search and category filters are retained; scanning does not change the active effect. The in-process UI only reads the catalog; a separate Python 3 process probes each library with a three-second timeout. The scan is explicit because native libraries execute code during discovery and again when selected. This is process isolation, not a security sandbox.
+
+For more effects, the properties include package suggestions and links to external collections. On Mint/Ubuntu/Debian, search your normal package manager for these collections:
+
+| Collection | Package |
+|---|---|
+| [Linux Studio Plugins](https://lsp-plug.in/) | `lsp-plugins-ladspa` |
+| Steve Harris plugins | `swh-plugins` |
+| C* Audio Plugin Suite | `caps` |
+| [Tom's Audio Processing](https://tap-plugins.sourceforge.io/) | `tap-plugins` |
+| Invada Studio | `invada-studio-plugins-ladspa` |
+| [DISTRHO](https://github.com/DISTRHO/DPF-Plugins) | `dpf-plugins-ladspa` |
+
+Install the desired packages yourself and scan/reload. Not every plugin in a package qualifies for this host; the catalog lists eligible LADSPA descriptors, not CLAP/LV2/VST variants or guarantees of audio quality. Availability varies by distribution. No package install or download is performed by HyperDSP.
+
+For custom installs, set the colon-separated `LADSPA_PATH` before launching OBS, or use the CLI below with explicit trusted paths. When LADSPA_PATH is set, it replaces default search locations. Otherwise the scanner checks user directories (~/.ladspa and ~/.local/lib/ladspa), system directories and the platform multiarch directory. Symlinked libraries are deduplicated by resolved path.
 
 ```sh
 python3 tools/scan-ladspa.py --probe build/hyperdsp-ladspa-probe
 ```
 
-The scanner checks standard system LADSPA directories (or explicitly supplied libraries/directories), starts a separate process per library with a three-second timeout, and atomically writes the user catalog to `~/.config/obs-studio/plugin_config/hyperdsp/ladspa-catalog.json` (respecting XDG_CONFIG_HOME). Reopen filter properties after scanning. Catalog reads do not execute plugin code; selecting a native plugin does. Process separation is crash isolation, not a security sandbox: scan only trusted libraries. A descriptor in the catalog is an eligibility result, not proof that its audio processing works.
-
-The install target includes both scanner files under `tools/`; the installed Python script locates its sibling probe by default. The catalog is local user data, not a shipped list of absolute paths. The audio test uses the real LADSPA SDK amplifier when installed; without it the LADSPA integration test is not registered.
+The scanner atomically writes `ladspa-catalog.json` in the module configuration directory (CLI default: ~/.config/obs-studio/plugin_config/hyperdsp, respecting XDG_CONFIG_HOME). The installed script and probe are under the plugin's tools directory. The build tree copies the script next to the module for development. Python 3 is needed for discovery, not for audio processing. See [external effect discovery](docs/external-effects.md).
 
 ## Migration status
 

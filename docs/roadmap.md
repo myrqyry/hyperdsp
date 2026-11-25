@@ -7,7 +7,7 @@ Standalone conventional audio effects and hosting for OBS, with optional inputs 
 - Mic DSP extraction (coordinated production migration still pending).
 - Native low/high/band-pass, notch, peak, shelves, comb, all-pass; 12–48 dB/oct resonant and normalized Butterworth cascades for low/high-pass.
 - Native filter LFO, peak-envelope and bass/mid/treble energy cutoff/Q/gain/mix/output bindings (four independent routes).
-- LADSPA hosting, searchable categorized catalog and parameter controls.
+- LADSPA hosting, searchable categorized catalog and parameter controls; explicit in-OBS asynchronous scanning/reload, user and custom search paths, package guidance and upstream links.
 - Shared wet/dry, input/output gain and smoothing for mixer controls.
 - LADSPA sine LFO for mix/output; four independent reactive routes (four LFO shapes, envelope, bass/mid/treble) to mix/output or continuous plugin input ports; existing OBS serial filter stack.
 
@@ -33,7 +33,7 @@ Standalone conventional audio effects and hosting for OBS, with optional inputs 
 
 ## Next layers
 
-- Favorites, reusable presets, reset/import/export, better effect descriptions and a compact native frequency-response view.
+- Unified discoverable effect library: favorites, native/installed external/community definitions, backend compatibility, descriptions, safe explicit acquisition and reusable presets. Reset/import/export and a compact native frequency-response view.
 - Extend the shared modulation matrix with a destination registry, configurable detector bands, additional backends, external signals and native port smoothing.
 - Extend optional interop to more Sight and Sound signals, handedness selection, Sound category picker and full live-producer qualification; retain versioned procedures, stable UUIDs and missing/stale-data fallback. No inference in HyperDSP and no producer calls on the audio callback.
 - Dedicated serial/parallel effect graph and eventual Effect Builder dock, following HyperShader’s existing Shader Builder interaction and recovery patterns. See [Effect Builder direction](effect-builder.md). Latency compensation and alignment; sidechains and appropriate oversampling for nonlinear effects.

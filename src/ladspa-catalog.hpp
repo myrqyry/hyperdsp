@@ -5,6 +5,8 @@
 #include <cctype>
 #include <cstdlib>
 #include <string>
+#include <sstream>
+#include <filesystem>
 #include <vector>
 
 namespace hyperdsp {
@@ -18,12 +20,28 @@ inline std::string lower(std::string text){
     for(char& c:text)c=char(std::tolower(static_cast<unsigned char>(c)));
     return text;
 }
+inline std::string catalog_path(){
+    if(const char* path=std::getenv("HYPERDSP_CATALOG"))return path;
+    char* config=obs_module_config_path("ladspa-catalog.json");
+    std::string result=config?config:"";bfree(config);return result;
+}
+inline bool catalog_matches(const CatalogEntry& e,const std::string& query){
+    auto searchable=lower(e.name+" "+e.label+" "+e.maker+" "+e.category+" "+
+        std::filesystem::path(e.path).filename().string()+" "+(e.channels==1?"mono":"stereo")+" ladspa");
+    std::istringstream words(lower(query));std::string word;
+    while(words>>word)if(searchable.find(word)==std::string::npos)return false;
+    return true;
+}
+struct CatalogScan {
+    static std::string start();
+    static std::string status();
+    static void stop();
+};
 inline Catalog read_catalog(){
     Catalog entries;
-    const char* override_path=std::getenv("HYPERDSP_CATALOG");
-    char* config=override_path?nullptr:obs_module_config_path("ladspa-catalog.json");
-    auto* root=obs_data_create_from_json_file(override_path?override_path:(config?config:""));
-    bfree(config);
+    const auto path=catalog_path();
+    if(path.empty())return entries;
+    auto* root=obs_data_create_from_json_file(path.c_str());
     if(!root)return entries;
     if(obs_data_get_int(root,"schema")==1){
         auto* items=obs_data_get_array(root,"effects");

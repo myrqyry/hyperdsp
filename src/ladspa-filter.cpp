@@ -233,7 +233,7 @@ struct Instance {
         }
     }
 };
-struct Filter {std::mutex mutex;std::unique_ptr<Instance> active;};
+struct Filter {std::mutex mutex;std::unique_ptr<Instance> active;obs_source_t* source=nullptr;};
 bool format(unsigned& rate,unsigned& channels){
     obs_audio_info ai{};
     if(!obs_get_audio_info(&ai))return false;
@@ -242,6 +242,10 @@ bool format(unsigned& rate,unsigned& channels){
 }
 const char* name(void*){return "HyperDSP LADSPA";}
 void defaults(obs_data_t* settings){
+    obs_data_set_default_string(settings,"catalog_sources",
+        "On Mint / Ubuntu / Debian, look for LADSPA packages in your software manager: "
+        "lsp-plugins-ladspa, swh-plugins, caps, tap-plugins, invada-studio-plugins-ladspa, dpf-plugins-ladspa. "
+        "Install trusted packages, then scan and reload. CLAP/LV2/VST/JSFX are not hosted here yet.");
     obs_data_set_default_double(settings,"mix",1.);
     obs_data_set_default_double(settings,"input_db",0.);
     obs_data_set_default_double(settings,"output_db",0.);
@@ -272,7 +276,7 @@ void update(void* ptr,obs_data_t* settings){
     if(!next->open(settings,rate,ch))next.reset();
     {std::lock_guard lock(f->mutex);f->active.swap(next);}
 }
-void* create(obs_data_t* s,obs_source_t*){auto f=std::make_unique<Filter>();update(f.get(),s);return f.release();}
+void* create(obs_data_t* s,obs_source_t* source){auto f=std::make_unique<Filter>();f->source=source;update(f.get(),s);return f.release();}
 void destroy(void* p){delete static_cast<Filter*>(p);}
 void fill_targets(obs_properties_t* props,const Instance* instance,obs_data_t* settings=nullptr){
     for(unsigned slot=0;slot<route_count;++slot){
@@ -312,43 +316,88 @@ bool modified(obs_properties_t* props,obs_property_t*,obs_data_t* settings){
     }
     return true;
 }
-bool browse(obs_properties_t* props,obs_property_t*,obs_data_t* settings){
-    auto* list=obs_properties_get(props,"catalog_effect");
-    auto* catalog=static_cast<hyperdsp::Catalog*>(obs_properties_get_param(props));
-    if(!list||!catalog)return false;
-    auto query=hyperdsp::lower(obs_data_get_string(settings,"catalog_search"));
-    std::string category=obs_data_get_string(settings,"catalog_category");
-    std::string current=std::string(obs_data_get_string(settings,"library"))+"\t"+obs_data_get_string(settings,"label");
+struct CatalogBrowser {
+    hyperdsp::Catalog entries=hyperdsp::read_catalog();
+    std::string query,category,current;
+};
+void fill_categories(obs_properties_t* props,const CatalogBrowser& browser){
+    auto* category=obs_properties_get(props,"catalog_category");if(!category)return;
+    obs_property_list_clear(category);
+    obs_property_list_add_string(category,"All effects","");
+    std::vector<std::string> categories;
+    for(auto& e:browser.entries)if(std::find(categories.begin(),categories.end(),e.category)==categories.end())categories.push_back(e.category);
+    if(!browser.category.empty()&&std::find(categories.begin(),categories.end(),browser.category)==categories.end())categories.push_back(browser.category);
+    std::sort(categories.begin(),categories.end());
+    for(auto& c:categories)obs_property_list_add_string(category,c.c_str(),c.c_str());
+}
+bool fill_results(obs_properties_t* props,CatalogBrowser& browser){
+    auto* list=obs_properties_get(props,"catalog_effect");if(!list)return false;
     unsigned rate=0,channels=0;format(rate,channels);
     obs_property_list_clear(list);
     obs_property_list_add_string(list,"Choose effect…","");
-    for(auto& e:*catalog){
-        const bool selected=e.id()==current;
-        if(!selected && ((e.channels==2&&channels!=2)||
-           (!category.empty()&&category!=e.category)||
-           (!query.empty()&&hyperdsp::lower(e.name+" "+e.label+" "+e.maker).find(query)==std::string::npos)))continue;
+    unsigned matches=0;bool current_found=false;
+    for(auto& e:browser.entries){
+        const bool selected=e.id()==browser.current;
+        current_found|=selected;
+        if(!selected&&((e.channels==2&&channels!=2)||
+            (!browser.category.empty()&&browser.category!=e.category)||!hyperdsp::catalog_matches(e,browser.query)))continue;
         auto title=e.name+" · "+(e.channels==1?"Mono":"Stereo")+(e.maker.empty()?"":" · "+e.maker);
-        obs_property_list_add_string(list,title.c_str(),e.id().c_str());
+        obs_property_list_add_string(list,title.c_str(),e.id().c_str());++matches;
+    }
+    if(!current_found&&browser.current!="	"&&!browser.current.empty()){
+        auto index=obs_property_list_add_string(list,"Current effect (not in catalog)",browser.current.c_str());
+        obs_property_list_item_disable(list,index,true);
+    }
+    auto description=std::to_string(matches)+" displayed / "+std::to_string(browser.entries.size())+" installed descriptors. ";
+    description+=browser.entries.empty()?"Scan installed effects to begin.":"Only trusted native effects; eligibility is not audio qualification.";
+    obs_property_set_long_description(list,description.c_str());
+    return true;
+}
+bool browse(obs_properties_t* props,obs_property_t*,obs_data_t* settings){
+    auto* browser=static_cast<CatalogBrowser*>(obs_properties_get_param(props));if(!browser)return false;
+    browser->query=obs_data_get_string(settings,"catalog_search");
+    browser->category=obs_data_get_string(settings,"catalog_category");
+    browser->current=std::string(obs_data_get_string(settings,"library"))+"	"+obs_data_get_string(settings,"label");
+    return fill_results(props,*browser);
+}
+bool start_scan(obs_properties_t* props,obs_property_t*,void*){
+    auto message=hyperdsp::CatalogScan::start();
+    auto* button=obs_properties_get(props,"catalog_reload");
+    if(button){
+        obs_property_set_long_description(button,message.c_str());
+        obs_property_set_description(button,message.starts_with("Scanning")?"Reload catalog (scan running)":"Reload catalog");
+    }
+    return true;
+}
+bool reload_catalog(obs_properties_t* props,obs_property_t*,void*){
+    auto* browser=static_cast<CatalogBrowser*>(obs_properties_get_param(props));if(!browser)return false;
+    auto status=hyperdsp::CatalogScan::status();
+    browser->entries=hyperdsp::read_catalog();fill_categories(props,*browser);fill_results(props,*browser);
+    auto* button=obs_properties_get(props,"catalog_reload");
+    if(button){
+        if(status.starts_with("Scan finished"))status="Catalog reloaded.";
+        obs_property_set_long_description(button,status.c_str());
+        obs_property_set_description(button,status.starts_with("Scanning")?"Reload catalog (scan running)":"Reload catalog");
     }
     return true;
 }
 bool select_effect(obs_properties_t* props,obs_property_t*,obs_data_t* settings){
-    auto* catalog=static_cast<hyperdsp::Catalog*>(obs_properties_get_param(props));
+    auto* browser=static_cast<CatalogBrowser*>(obs_properties_get_param(props));
     std::string selected=obs_data_get_string(settings,"catalog_effect");
-    if(!catalog||selected.empty())return false;
-    for(auto& e:*catalog)if(e.id()==selected){
+    if(!browser||selected.empty())return false;
+    for(auto& e:browser->entries)if(e.id()==selected){
         if(e.path==obs_data_get_string(settings,"library")&&e.label==obs_data_get_string(settings,"label"))return false;
         for(unsigned p=0;p<max_ports;++p)obs_data_unset_user_value(settings,key(p).c_str());
         obs_data_set_string(settings,"library",e.path.c_str());
         obs_data_set_string(settings,"label",e.label.c_str());
-        return modified(props,nullptr,settings);
+        browser->current=selected;return modified(props,nullptr,settings);
     }
     return false;
 }
 bool manual_modified(obs_properties_t* props,obs_property_t* prop,obs_data_t* settings){
     std::string current=std::string(obs_data_get_string(settings,"library"))+"\t"+obs_data_get_string(settings,"label");
     if(current!=obs_data_get_string(settings,"catalog_effect"))obs_data_set_string(settings,"catalog_effect","");
-    return modified(props,prop,settings);
+    browse(props,prop,settings);return modified(props,prop,settings);
 }
 bool reactive_visibility(obs_properties_t* props,obs_property_t*,obs_data_t* settings){
     for(unsigned slot=0;slot<route_count;++slot){
@@ -366,22 +415,35 @@ bool reactive_visibility(obs_properties_t* props,obs_property_t*,obs_data_t* set
 }
 obs_properties_t* properties(void* p){
     auto* props=obs_properties_create();
-    auto* catalog=new hyperdsp::Catalog(hyperdsp::read_catalog());
-    obs_properties_set_param(props,catalog,[](void* v){delete static_cast<hyperdsp::Catalog*>(v);});
+    auto* browser=new CatalogBrowser;
+    obs_properties_set_param(props,browser,[](void* v){delete static_cast<CatalogBrowser*>(v);});
+    auto* scan=obs_properties_add_button2(props,"catalog_scan","Scan installed effects",start_scan,nullptr);
+    obs_property_set_long_description(scan,"Explicitly probe installed LADSPA libraries in separate processes. Only scan trusted locations; this is not a security sandbox.");
+    auto* reload=obs_properties_add_button2(props,"catalog_reload","Reload catalog",reload_catalog,nullptr);
+    obs_property_set_long_description(reload,hyperdsp::CatalogScan::status().c_str());
+    auto* guide=obs_properties_add_text(props,"catalog_sources","Find more effects",OBS_TEXT_INFO);
+    obs_property_text_set_info_word_wrap(guide,true);
+    auto* collections=obs_properties_create();
+    auto add_collection=[&](const char* key,const char* title,const char* url){
+        auto* link=obs_properties_add_button2(collections,key,title,nullptr,nullptr);
+        obs_property_button_set_type(link,OBS_BUTTON_URL);
+        // libobs copies the URL; the API takes char* for historical reasons.
+        std::string copy(url);obs_property_button_set_url(link,copy.data());
+    };
+    add_collection("catalog_lsp","Linux Studio Plugins (LSP)","https://lsp-plug.in/");
+    add_collection("catalog_tap","Tom's Audio Processing (TAP)","https://tap-plugins.sourceforge.io/");
+    add_collection("catalog_dpf","DISTRHO Plugins","https://github.com/DISTRHO/DPF-Plugins");
+    obs_properties_add_group(props,"catalog_collections","External effect collections",OBS_GROUP_NORMAL,collections);
     auto* search=obs_properties_add_text(props,"catalog_search","Search effects",OBS_TEXT_DEFAULT);
     auto* category=obs_properties_add_list(props,"catalog_category","Category",OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_STRING);
-    obs_property_list_add_string(category,"All effects","");
-    std::vector<std::string> categories;
-    for(auto& e:*catalog)if(std::find(categories.begin(),categories.end(),e.category)==categories.end())categories.push_back(e.category);
-    std::sort(categories.begin(),categories.end());
-    for(auto& c:categories)obs_property_list_add_string(category,c.c_str(),c.c_str());
+    fill_categories(props,*browser);
     auto* list=obs_properties_add_list(props,"catalog_effect","Effect",OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_STRING);
-    obs_property_set_long_description(list,catalog->empty()?"No catalog found. Run scan-ladspa.py, then reopen properties. Manual selection remains available.":"Only trusted native effects. Discovery is isolated; selected effects run in OBS.");
     obs_property_set_modified_callback(search,browse);
     obs_property_set_modified_callback(category,browse);
     obs_property_set_modified_callback(list,select_effect);
-    auto* initial=obs_data_create();
+    auto* initial=p?obs_source_get_settings(static_cast<Filter*>(p)->source):obs_data_create();
     browse(props,nullptr,initial);
+    fill_categories(props,*browser);
     obs_data_release(initial);
     auto* path=obs_properties_add_path(props,"library","Trusted LADSPA library",OBS_PATH_FILE,"Shared library (*.so)",nullptr);
     obs_property_set_long_description(path,"Native code executes inside OBS. Only choose plugins you trust.");

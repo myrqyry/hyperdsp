@@ -1,5 +1,6 @@
 #include <obs-module.h>
 #include "interop/external_inputs.hpp"
+#include "ladspa-catalog.hpp"
 
 extern "C" struct obs_source_info mic_filter;
 extern "C" struct obs_source_info ladspa_filter;
@@ -27,4 +28,4 @@ bool obs_module_load(void)
     return true;
 }
 
-void obs_module_unload(void){hyperdsp::stop_external_polling();}
+void obs_module_unload(void){hyperdsp::CatalogScan::stop();hyperdsp::stop_external_polling();}

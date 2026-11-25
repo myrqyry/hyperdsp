@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import sysconfig
 
 def category(name):
     groups = {
@@ -27,7 +28,12 @@ def main():
     args = parser.parse_args()
     if not args.probe.is_file():
         parser.error("build hyperdsp-ladspa-probe and pass --probe")
-    roots = args.paths or [Path("/usr/lib/ladspa"), Path("/usr/local/lib/ladspa"), Path("/usr/lib/x86_64-linux-gnu/ladspa")]
+    configured = os.environ.get("LADSPA_PATH")
+    defaults = [Path.home()/".ladspa", Path.home()/".local/lib/ladspa",
+                Path("/usr/lib/ladspa"), Path("/usr/local/lib/ladspa"), Path("/usr/lib64/ladspa")]
+    if multiarch := sysconfig.get_config_var("MULTIARCH"):
+        defaults += [Path("/usr/lib")/multiarch/"ladspa", Path("/usr/local/lib")/multiarch/"ladspa"]
+    roots = args.paths or ([Path(p).expanduser() for p in configured.split(os.pathsep) if p] if configured is not None else defaults)
     paths = sorted({p.resolve() for root in roots for p in ([root] if root.is_file() else root.glob("*.so")) if p.is_file()})
     effects, failed = [], []
     for path in paths:

@@ -8,6 +8,10 @@ A dock for composing, previewing, saving and applying reusable deterministic aud
 
 Reuse HyperShader's proven frontend ideas (Qt WebEngine dock, narrowly scoped native bridge, drafts/recovery, explicit export/apply and validation feedback) after inspecting their actual implementation. Do not assume shader preview execution is suitable for audio. Avoid mandatory WebEngine or frontend API dependencies in the headless DSP module.
 
+## Effect discovery
+
+User wants external effects easy to find. The eventual library should bring native blocks, installed third-party effects, community HyperDSP definitions and discoverable upstream collections into one searchable surface, showing format, compatibility and installed/available state. Reuse the current LADSPA catalog scanner and versioned metadata; do not load unknown native libraries merely to browse an online listing. Acquisition should be explicit and provenance visible. Prefer package-manager or official-source links before implementing any downloader. Favorites, tags and author-defined controls should work across supported backends. Unsupported formats can be discoverable as clearly labeled unavailable, never silently loaded.
+
 ## Proposed implementation order
 
 1. Expand native DSP building blocks (dynamics, saturation, delay, modulation/time effects, reverb).
