@@ -41,6 +41,8 @@ Standalone conventional audio effects and hosting for OBS, with optional inputs 
 
 - Author-defined graph macro controls, bounded validated multi-parameter mappings, in-place engine updates preserving DSP state, generated OBS sliders and two tested reusable JSON examples.
 
+- Sample-clocked graph reactive routes to exposed macros with 64-sample control updates; existing Sound/Sight subscription integration and fallback.
+
 ## Next layers
 
 - Unified discoverable effect library: favorites, native/installed external/community definitions, backend compatibility, descriptions, safe explicit acquisition and reusable presets. Reset/import/export and a compact native frequency-response view.

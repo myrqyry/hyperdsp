@@ -13,7 +13,8 @@ struct GraphEdge {int source=-1;double weight=1;};
 struct GraphNode {std::string effect;Parameters params;std::vector<GraphEdge> inputs;};
 struct GraphBinding {int node;std::string parameter;double low,high;};
 struct GraphControl {std::string id,name;double initial=0;std::vector<GraphBinding> bindings;};
-struct GraphSpec {std::vector<GraphNode> nodes;int output=-1;std::vector<GraphControl> controls;};
+struct GraphRoute {std::string control;RouteConfig config;std::string channel,category;};
+struct GraphSpec {std::vector<GraphNode> nodes;int output=-1;std::vector<GraphControl> controls;std::vector<GraphRoute> routes;};
 inline bool graph_control_id(std::string_view id){
     if(id.empty()||id.size()>32)return false;
     for(char c:id)if(!((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_'))return false;
@@ -61,7 +62,17 @@ class PreparedGraph {
     int output_=-1;
     bool unknown_latency_=false;
     std::vector<GraphControl> controls_;
-    Values values_{};
+    Values values_{},effective_{},offsets_{},sums_{};
+    ModulationMatrix modulation_;
+    static constexpr unsigned control_quantum=64;
+    unsigned quantum_position_=0;
+    bool reactive_=false;
+    void apply_effective(){
+        auto next=values_;
+        for(unsigned i=0;i<controls_.size();++i)next[i]=std::clamp(next[i]+offsets_[i],0.,1.);
+        if(next!=effective_){for(auto& n:nodes_)if(n.apply)n.apply(next);effective_=next;}
+    }
+
     template<class S,class E,size_t N>
     static bool bind_native(Node& node,E* engine,S& settings,const FloatParameter<S>(&schema)[N],
         const std::vector<Mapping>& mappings,const Values& values,int short_mode=0){
@@ -120,6 +131,22 @@ public:
         }
         g->controls_=s.controls;
         if(!g->resolve_values(overrides,g->values_,error))return nullptr;
+        g->effective_=g->values_;
+        if(s.routes.size()>modulation_slots)return fail("At most 4 graph modulation routes");
+        auto in_range=[](double v,double lo,double hi){return std::isfinite(v)&&v>=lo&&v<=hi;};
+        for(unsigned i=0;i<s.routes.size();++i){
+            const auto& route=s.routes[i];auto c=route.config;
+            auto it=std::find_if(s.controls.begin(),s.controls.end(),[&](auto& control){return control.id==route.control;});
+            if(it==s.controls.end()||c.source<1||c.source>10||c.shape<0||c.shape>3||
+               !in_range(c.amount,-1,1)||!in_range(c.hz,.05,20)||!in_range(c.attack,1,200)||
+               !in_range(c.release,10,2000)||!in_range(c.sensitivity,-24,24)||
+               route.channel.size()>160||route.category.size()>256||
+               (c.source>=6&&route.channel.empty())||(c.source==6&&route.category.empty()))
+                return fail("Invalid graph modulation route");
+            c.destination=int(it-s.controls.begin());
+            g->modulation_.configure(i,rate,c,true);g->reactive_=true;
+        }
+
         unsigned edges=0;
         for(int i=0;i<count;++i){
             auto& n=s.nodes[i];
@@ -297,13 +324,24 @@ public:
     bool set_controls(const Parameters& updates,std::string& error){
         error.clear();auto next=values_;
         if(!resolve_values(updates,next,error))return false;
-        if(next!=values_){for(auto& n:nodes_)if(n.apply)n.apply(next);values_=next;}
+        if(next!=values_){values_=next;apply_effective();}
         return true;
     }
+    void external_values(const std::array<float,modulation_slots>& values){modulation_.external_values(values);}
     void process(float*const* p,unsigned channels,unsigned frames){
         if(!p||channels!=channels_||output_<0)return;
         for(unsigned offset=0;offset<frames;){
             unsigned size=std::min(chunk,frames-offset);
+            if(reactive_)size=std::min(size,control_quantum-quantum_position_);
+            if(reactive_){
+                for(unsigned j=0;j<size;++j){
+                    std::array<float,8> samples{};
+                    for(unsigned c=0;c<channels;++c)if(p[c]&&std::isfinite(p[c][offset+j]))samples[c]=p[c][offset+j];
+                    auto frame=modulation_.next(samples.data(),channels);
+                    for(auto& e:frame.entries)if(e.destination>=0)sums_[e.destination]+=e.value;
+                }
+            }
+
             for(auto index:order_){
                 auto& node=nodes_[index];std::fill(node.audio.begin(),node.audio.end(),0);
                 for(auto& edge:node.inputs){
@@ -332,6 +370,13 @@ public:
             for(unsigned c=0;c<channels;++c)if(p[c])
                 std::copy_n(nodes_[output_].audio.data()+c*chunk,size,p[c]+offset);
             offset+=size;
+            if(reactive_){
+                quantum_position_+=size;
+                if(quantum_position_==control_quantum){
+                    for(unsigned i=0;i<controls_.size();++i)offsets_[i]=sums_[i]/control_quantum;
+                    sums_={};quantum_position_=0;apply_effective();
+                }
+            }
         }
     }
 };

@@ -1,6 +1,7 @@
 #include <obs-module.h>
 #include <jansson.h>
 #include "ladspa-catalog.hpp"
+#include "interop/external_inputs.hpp"
 #include "framework/dsp/effect_graph.hpp"
 #include <mutex>
 #include <cstring>
@@ -10,6 +11,7 @@ constexpr const char* empty_graph=R"({"schema":1,"nodes":[],"output":-1})";
 struct Source {
     std::mutex mutex,control;
     std::unique_ptr<PreparedGraph> active;
+    ExternalInputs external;
     unsigned rate=0,channels=0;
     std::string accepted,error;
     obs_source_t* source=nullptr;
@@ -34,7 +36,7 @@ bool parse(const std::string& raw,GraphSpec& spec,std::string& error){
     if(!root){error="Invalid JSON: "+std::string(detail.text);return false;}
     auto* j=root.get();int schema=0;
     auto* nodes=json_object_get(j,"nodes");
-    if(!keys(j,{"schema","nodes","output","controls"})||!integer(json_object_get(j,"schema"),schema)||schema!=1||
+    if(!keys(j,{"schema","nodes","output","controls","routes"})||!integer(json_object_get(j,"schema"),schema)||schema!=1||
         !integer(json_object_get(j,"output"),spec.output)||!json_is_array(nodes)||json_array_size(nodes)>16){
         error="Invalid graph schema";return false;
     }
@@ -88,6 +90,36 @@ bool parse(const std::string& raw,GraphSpec& spec,std::string& error){
             spec.controls.push_back(std::move(control));
         }
     }
+    if(auto* routes=json_object_get(j,"routes")){
+        if(!json_is_array(routes)||json_array_size(routes)>modulation_slots){error="Invalid graph routes";return false;}
+        size_t ri;json_t* r;
+        json_array_foreach(routes,ri,r){
+            GraphRoute route;
+            auto* control=json_object_get(r,"control");
+            auto number=[&](const char* key,double& value){
+                auto* v=json_object_get(r,key);if(!v)return true;
+                if(!json_is_number(v))return false;
+                value=json_number_value(v);return true;
+            };
+            auto text=[&](const char* key,std::string& value,size_t max){
+                auto* v=json_object_get(r,key);if(!v)return true;
+                if(!json_is_string(v)||json_string_length(v)>max)return false;
+                value=json_string_value(v);return true;
+            };
+            auto* shape=json_object_get(r,"shape");
+            if(!keys(r,{"control","source","shape","rate","amount","attack","release","sensitivity","channel","category"})||
+                !json_is_string(control)||json_string_length(control)>32||
+                !integer(json_object_get(r,"source"),route.config.source)||
+                (shape&&!integer(shape,route.config.shape))||
+                !json_is_number(json_object_get(r,"amount"))||
+                !number("amount",route.config.amount)||!number("rate",route.config.hz)||
+                !number("attack",route.config.attack)||!number("release",route.config.release)||
+                !number("sensitivity",route.config.sensitivity)||!text("channel",route.channel,160)||!text("category",route.category,256)){
+                error="Invalid graph modulation route";return false;
+            }
+            route.control=json_string_value(control);spec.routes.push_back(std::move(route));
+        }
+    }
     return true;
 }
 std::string control_key(const GraphControl& c){return "graph_control_"+c.id;}
@@ -115,13 +147,17 @@ void update(void* ptr,obs_data_t* settings){
     }
     GraphSpec spec;std::string error;
     std::unique_ptr<PreparedGraph> next;
+    ExternalInputs external;
     try{if(parse(raw,spec,error)){
         std::vector<std::string> allowed;
         if(std::any_of(spec.nodes.begin(),spec.nodes.end(),[](auto& n){return n.effect.starts_with("ladspa:");}))
             for(auto& e:read_catalog())allowed.push_back("ladspa:"+e.id());
         next=PreparedGraph::prepare(spec,rate,channels,error,allowed,control_values(settings,spec.controls));
+        if(next)for(unsigned i=0;i<spec.routes.size();++i){
+            const auto& r=spec.routes[i];external.configure(i,r.config.source,r.channel.c_str(),r.category.c_str());
+        }
     }}
-    catch(const std::exception& ex){error=ex.what();}
+    catch(const std::exception& ex){next.reset();error=ex.what();}
     if(!next){
         {std::lock_guard lock(f->mutex);f->error=error;}
         blog(LOG_WARNING,"[HyperDSP Graph] Rejected graph: %s",error.c_str());return;
@@ -131,7 +167,7 @@ void update(void* ptr,obs_data_t* settings){
     {
         std::lock_guard lock(f->mutex);
         refresh=bool(f->active)&&f->accepted!=raw;
-        f->active.swap(next);f->rate=rate;f->channels=channels;f->accepted=raw;f->error.clear();
+        f->active.swap(next);std::swap(f->external,external);f->rate=rate;f->channels=channels;f->accepted=raw;f->error.clear();
     }
     control.unlock();
     if(refresh&&f->source)obs_source_update_properties(f->source);
@@ -149,7 +185,7 @@ obs_properties_t* properties(void* p){
         if(f->active)for(auto& c:f->active->controls()){
             auto key=control_key(c);
             auto* slider=obs_properties_add_float_slider(props,key.c_str(),c.name.c_str(),0,1,.01);
-            obs_property_set_long_description(slider,"Exposed graph control: mapped to one or more internal parameters. No graph rebuild.");
+            obs_property_set_long_description(slider,"Exposed graph control: mapped to one or more internal parameters. Reactive routes add to this base value. No graph rebuild.");
         }
         if(!f->error.empty())status+=" Last error: "+f->error;
         else if(f->active)status+=" Known fixed latency: "+std::to_string(f->active->latency())+" samples."+(f->active->latency_known()?"":" Additional LADSPA latency is unknown and uncompensated.");
@@ -163,6 +199,7 @@ obs_audio_data* process(void* ptr,obs_audio_data* audio){
     obs_audio_info ai{};
     if(!obs_get_audio_info(&ai)||ai.samples_per_sec!=f->rate||get_audio_channels(ai.speakers)!=f->channels)return audio;
     std::array<float*,8> p{};for(unsigned c=0;c<f->channels;++c)p[c]=reinterpret_cast<float*>(audio->data[c]);
+    f->active->external_values(f->external.snapshot());
     f->active->process(p.data(),f->channels,audio->frames);return audio;
 }
 }

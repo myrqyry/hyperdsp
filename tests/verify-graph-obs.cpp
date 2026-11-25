@@ -14,6 +14,7 @@
 #include <thread>
 #include <array>
 #include "sound-signal-fixture.hpp"
+#include "sight-signal-fixture.hpp"
 
 
 struct Stats {
@@ -123,6 +124,25 @@ int main(int argc,char**argv){
     macro_ok=macro_ok&&std::abs(macro_default[0]-.0710469)<.002&&std::abs(macro_high[0]-.282843)<.002&&
         std::abs(macro_low[0]-.0178462)<.002&&std::abs(macro_bad[0]-macro_low[0])<.002;
     std::printf("GRAPH_MACRO_OBS default=%g high=%g low=%g invalid_retained=%g pass=%d\n",macro_default[0],macro_high[0],macro_low[0],macro_bad[0],macro_ok);
+    obs_register_source(&sound_fixture::info);
+    obs_register_source(&sight_fixture::info);
+    auto* producer=obs_source_create_private("yamnet_classifier_source","classifier",nullptr);
+    obs_source_filter_add(source,producer);
+    std::string channel=std::string(obs_source_get_uuid(source))+"/"+obs_source_get_uuid(producer);
+    const std::string base=R"({"schema":1,"nodes":[{"effect":"gain","inputs":[{"source":-1,"weight":1}]},{"effect":"gain","inputs":[{"source":0,"weight":1}]}],"output":1,"controls":[{"id":"reactive","name":"Reactive level","default":0,"bindings":[{"node":0,"parameter":"gain_db","low":-12,"high":0},{"node":1,"parameter":"gain_db","low":-12,"high":0}]}],"routes":[)";
+    const std::string sound=base+R"({"control":"reactive","source":6,"amount":1,"channel":")"+channel+R"(","category":"Speech"}]})";
+    obs_data_set_string(settings,"graph_json",sound.c_str());obs_source_update(filter,settings);
+    auto sound_active=measure();
+    sound_fixture::available=false;auto sound_fallback=measure();
+    const std::string sight=base+R"({"control":"reactive","source":8,"amount":1,"channel":"test-hand"}]})";
+    obs_data_set_string(settings,"graph_json",sight.c_str());obs_source_update(filter,settings);
+    auto sight_active=measure();
+    sight_fixture::available=false;auto sight_fallback=measure();
+    obs_source_filter_remove(source,producer);obs_source_release(producer);
+    bool reactive_ok=std::abs(sound_active[0]-.0710469)<.002&&std::abs(sound_fallback[0]-.0178462)<.002&&
+        std::abs(sight_active[0]-.142014)<.003&&std::abs(sight_fallback[0]-.0178462)<.002&&
+        sound_fixture::calls>0&&sight_fixture::calls>0;
+    std::printf("GRAPH_REACTIVE_OBS sound=%g fallback=%g sight=%g fallback=%g pass=%d\n",sound_active[0],sound_fallback[0],sight_active[0],sight_fallback[0],reactive_ok);
     bool external_ok=true;
     if(argc==4){
         const std::string id=std::string("ladspa:")+argv[3]+"\tamp_mono";
@@ -152,7 +172,7 @@ int main(int argc,char**argv){
         if(props)obs_properties_destroy(props);
         auto result=measure();presets_ok=presets_ok&&std::isfinite(result[0])&&result[0]>.001;
     }
-    bool ok=presets_ok&&macro_ok&&external_ok&&mixed_ok&&controls&&std::abs(a[0]-.071046)<.002&&std::abs(a[1]/a[0]-.4)<.001&&b[0]<1e-5&&c[0]<1e-5&&d[0]<1e-5&&duplicate[0]<1e-5&&malformed[0]<1e-5&&std::abs(bypass[0]-.282843)<.002;
+    bool ok=reactive_ok&&presets_ok&&macro_ok&&external_ok&&mixed_ok&&controls&&std::abs(a[0]-.071046)<.002&&std::abs(a[1]/a[0]-.4)<.001&&b[0]<1e-5&&c[0]<1e-5&&d[0]<1e-5&&duplicate[0]<1e-5&&malformed[0]<1e-5&&std::abs(bypass[0]-.282843)<.002;
     std::printf("GRAPH_OBS serial=%g parallel=%g invalid=%g invalid_param=%g bypass=%g pass=%d\n",a[0],b[0],c[0],d[0],bypass[0],ok);
     obs_set_output_source(1,nullptr);obs_source_dec_active(source);obs_source_filter_remove(source,filter);
     obs_source_release(filter);obs_source_release(source);obs_data_release(settings);obs_shutdown();return ok?0:1;
