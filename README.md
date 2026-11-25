@@ -43,6 +43,12 @@ Each LADSPA filter also exposes input gain and output gain (−24 to +24 dB) and
 
 The LADSPA filter includes a sine LFO (0.05–20 Hz) with adjustable depth and destination: wet/dry or output amplitude (tremolo). Wet/dry modulation adds the bipolar LFO to the base value and clamps to 0–1; output amplitude is multiplied by 1 + depth × sine. Destination/depth changes ramp over 10 ms, and all channels share the same sample-clocked phase. Disabling modulation leaves the unmodulated effect settings intact. The phase freezes when both modulation depths are zero and resets on a new effect instance. This is a reusable deterministic modulation core, not yet a general-purpose routing matrix or a Sight/Sound consumer.
 
+### Reactive parameter routing
+
+The LADSPA filter additionally provides a reactive source (sine, triangle, square or saw LFO, linked input envelope, or bass/mid/treble energy) and one destination: wet/dry, output amplitude, or an eligible continuous input control port of the selected effect. The signed amount is in the parameter's own units (up to ±10000), clamped to the host range; mix/output use ±1. Band sensitivity is ±24 dB. Detection is pre-trim. Native plugin ports are updated using the mean modulation value over sub-blocks of at most 64 samples; mixer destinations are sample-clocked. All channels receive the same modulation. Existing LFO settings remain independent and retain their previous behavior.
+
+Port bindings include the library path, effect label and port index, so changing effects does not silently redirect a saved route. Incompatible destinations are inactive and shown as unavailable when inspecting a valid replacement effect. Integer/toggle controls are excluded. An amount edit on the same route ramps over 10 ms; disabling or replacing the route restores the base value immediately. This is not a general multi-route modulation matrix, and third-party effects may introduce their own parameter smoothing or latency.
+
 ### Refresh the catalog
 
 After building, run:

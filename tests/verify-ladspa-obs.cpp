@@ -45,13 +45,13 @@ static obs_source_info fixture_source = {
     .create=fixture_create,
     .destroy=fixture_destroy,
 };
-static void stream(obs_source_t* source, int rounds) {
+static void stream(obs_source_t* source, int rounds, double hz=9000.) {
     static constexpr uint32_t FRAMES=480;
     std::array<float, FRAMES> l{},r{};
     uint64_t start=os_gettime_ns();
     for (int k=0;k<rounds;++k) {
         for (unsigned i=0;i<FRAMES;++i) {
-            const float phase=float((uint64_t(k)*FRAMES+i)*6.283185307179586*9000.0/48000.0);
+            const float phase=float((uint64_t(k)*FRAMES+i)*6.283185307179586*hz/48000.0);
             l[i]=.4f*std::sin(phase);
             r[i]=.16f*std::sin(phase);
         }
@@ -119,10 +119,11 @@ int main(int argc,char**argv) {
     obs_source_inc_active(source);
     obs_source_set_audio_active(source,true);
     obs_source_set_async_unbuffered(source,true);
-    auto measure=[&] {
+    auto measure=[&](double hz=9000.,int warmup=0) {
+        if(warmup)stream(source,warmup,hz);
         Stats stats;
         obs_source_add_audio_capture_callback(source,capture,&stats);
-        stream(source,40);
+        stream(source,40,hz);
         obs_source_remove_audio_capture_callback(source,capture,&stats);
         return std::array<double,2>{std::sqrt(stats.sum_l.load()/std::max<uint64_t>(1,stats.samples.load())),
                                    std::sqrt(stats.sum_r.load()/std::max<uint64_t>(1,stats.samples.load()))};
@@ -185,6 +186,49 @@ int main(int argc,char**argv) {
     obs_data_set_double(settings,"port_0",.75);
     obs_source_update(filter,settings);
     auto mono=measure();
+    auto* mod_props=obs_source_properties(filter);
+    auto* dest=mod_props?obs_properties_get(mod_props,"react_target"):nullptr;
+    std::string port;
+    if(dest)for(size_t i=0;i<obs_property_list_item_count(dest);++i){
+        const char* v=obs_property_list_item_string(dest,i);
+        if(v&&std::string(v).ends_with("\tamp_mono\t0"))port=v;
+    }
+    bool react_ok=!port.empty();
+    if(mod_props)obs_properties_destroy(mod_props);
+    obs_data_set_double(settings,"port_0",.25);
+    obs_data_set_int(settings,"react_source",3);
+    obs_data_set_string(settings,"react_target",port.c_str());
+    obs_data_set_double(settings,"react_amount",.5);
+    obs_data_set_double(settings,"react_sensitivity",6.);
+    obs_source_update(filter,settings);
+    auto bass=measure(100,60);
+    auto reject=measure(9000,100);
+    obs_data_set_string(settings,"label","amp_stereo");
+    obs_source_update(filter,settings);
+    auto stale=measure(100,20);
+    auto* stale_props=obs_source_properties(filter);
+    auto* stale_dest=stale_props?obs_properties_get(stale_props,"react_target"):nullptr;
+    bool stale_visible=false;
+    if(stale_dest)for(size_t i=0;i<obs_property_list_item_count(stale_dest);++i){
+        auto* value=obs_property_list_item_string(stale_dest,i);
+        auto* name=obs_property_list_item_name(stale_dest,i);
+        if(value&&name&&port==value&&std::string(name).starts_with("Unavailable"))stale_visible=true;
+    }
+    if(stale_props)obs_properties_destroy(stale_props);
+    react_ok=react_ok&&stale_visible;
+    obs_data_set_string(settings,"react_target","output");
+    obs_data_set_double(settings,"react_amount",1.);
+    obs_source_update(filter,settings);
+    auto output=measure(100,60);
+    obs_data_set_int(settings,"react_source",0);
+    obs_source_update(filter,settings);
+    auto disabled=measure(100,20);
+    react_ok=react_ok&&bass[0]>.15&&reject[0]<.08&&
+       std::abs(bass[1]/bass[0]-.4)<.001&&
+       std::abs(stale[0]-.4/std::sqrt(2.)*.25)<.002&&
+       output[0]>.11&&std::abs(disabled[0]-stale[0])<.002;
+    std::printf("LADSPA_REACT bass=%g reject=%g stale=%g output=%g disabled=%g pass=%d\n",
+       bass[0],reject[0],stale[0],output[0],disabled[0],react_ok);
     obs_data_set_double(settings,"output_db",12.);
     obs_data_set_string(settings,"label","unknown_label");
     obs_source_update(filter,settings);
@@ -193,7 +237,7 @@ int main(int argc,char**argv) {
     obs_source_update(filter,settings);
     auto dry=measure();
     auto near=[](double a,double b){return std::abs(a-b)<.005;};
-    bool pass=prop_ok && browser_ok && lfo_ok && near(quiet[0],.4/std::sqrt(2.)*.25) && near(quiet[1],.16/std::sqrt(2.)*.25)
+    bool pass=react_ok && prop_ok && browser_ok && lfo_ok && near(quiet[0],.4/std::sqrt(2.)*.25) && near(quiet[1],.16/std::sqrt(2.)*.25)
         && near(louder[0],quiet[0]*2) && near(louder[1],quiet[1]*2)
         && near(blend[0],.4/std::sqrt(2.)*.75) && near(blend[1],.16/std::sqrt(2.)*.75)
         && near(bypass[0],.4/std::sqrt(2.)) && near(bypass[1],.16/std::sqrt(2.))
