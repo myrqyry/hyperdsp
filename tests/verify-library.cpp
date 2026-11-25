@@ -1,4 +1,5 @@
 #include "effect-library.hpp"
+#include "framework/dsp/parameter_schema.hpp"
 #include <obs.h>
 #include <cstdio>
 #include <set>
@@ -22,6 +23,22 @@ int main(int argc,char** argv){
         }
         if(props)obs_properties_destroy(props);
     }
+    auto parity=[&](const char* source,const auto& settings,const auto& specs){
+        auto* props=obs_get_source_properties(source);auto* defaults=obs_get_source_defaults(source);
+        bool equal=props&&defaults;
+        if(equal)for(auto& spec:specs){
+            auto* p=obs_properties_get(props,spec.key);
+            equal=equal&&p&&obs_property_get_type(p)==OBS_PROPERTY_FLOAT&&
+                obs_property_float_min(p)==spec.min&&obs_property_float_max(p)==spec.max&&
+                obs_property_float_step(p)==spec.step&&obs_data_get_double(defaults,spec.key)==settings.*spec.member&&
+                std::string(obs_property_description(p))==spec.name;
+        }
+        if(props)obs_properties_destroy(props);
+        if(defaults)obs_data_release(defaults);
+        return equal;
+    };
+    ok=ok&&parity("hyperdsp_color_filter",hyperdsp::ColorSettings{},hyperdsp::color_parameters)&&
+        parity("hyperdsp_spectral_filter",hyperdsp::SpectralSettings{},hyperdsp::spectral_parameters);
     auto entries=hyperdsp::effect_library(hyperdsp::read_catalog(argv[3]),2);
     unsigned native=0,external=0;
     for(auto& e:entries){

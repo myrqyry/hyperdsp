@@ -12,7 +12,7 @@ Reuse HyperShader's proven frontend ideas (Qt WebEngine dock, narrowly scoped na
 
 User wants external effects easy to find. The eventual library should bring native blocks, installed third-party effects, community HyperDSP definitions and discoverable upstream collections into one searchable surface, showing format, compatibility and installed/available state. Reuse the current LADSPA catalog scanner and versioned metadata; do not load unknown native libraries merely to browse an online listing. Acquisition should be explicit and provenance visible. Prefer package-manager or official-source links before implementing any downloader. Favorites, tags and author-defined controls should work across supported backends. Unsupported formats can be discoverable as clearly labeled unavailable, never silently loaded.
 
-The shared native/installed metadata inventory and JSON export are implemented (see [effect library contract](effect-library.md)); the graphical library, favorites, graph and acquisition workflow are still future work.
+The shared native/installed metadata inventory and JSON export are implemented (see [effect library contract](effect-library.md)); the graphical library, favorites and acquisition workflow are still future work. An initial executable [effect graph](effect-graph.md) supports Color, Spectral and gain, fixed branch alignment, and shared parameter definitions. The remaining node adapters, sidechains, graph modulation, exposed controls and editor remain future work.
 
 ## Proposed implementation order
 
@@ -24,4 +24,4 @@ The shared native/installed metadata inventory and JSON export are implemented (
 
 Sight and Sound provide optional data inputs to modulation, not DSP nodes that load models. Aftermarket remains responsible for OBS interaction/routing, not effect execution. No new mandatory neural or GUI dependency.
 
-The graph is a proposal: details such as UI framework, portable format and script language remain open pending real runtime and licensing evidence.
+The initial graph has a versioned JSON contract; UI framework, portable external identities and script language remain open pending real runtime and licensing evidence.

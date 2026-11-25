@@ -11,6 +11,7 @@ extern "C" struct obs_source_info time_filter;
 extern "C" struct obs_source_info space_filter;
 extern "C" struct obs_source_info spectral_filter;
 extern "C" struct obs_source_info formant_filter;
+extern "C" struct obs_source_info graph_filter;
 OBS_DECLARE_MODULE()
 
 bool obs_module_load(void)
@@ -25,6 +26,7 @@ bool obs_module_load(void)
     obs_register_source(&space_filter);
     obs_register_source(&spectral_filter);
     obs_register_source(&formant_filter);
+    obs_register_source(&graph_filter);
     return true;
 }
 

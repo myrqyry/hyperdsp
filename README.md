@@ -17,7 +17,30 @@ The first verified target is the microphone coloration filter: dynamic, condense
 
 ## Build and test (Linux)
 
-Requires a C++20 compiler, CMake, OBS development headers, libobs, and LADSPA SDK headers (on Mint: ladspa-sdk). Run `tests/verify.sh` for the DSP unit test and real OBS post-filter stereo capture test. No model, download, audio device or neural dependency is needed.
+Requires a C++20 compiler, CMake, OBS development headers, libobs, Jansson development headers/library, and LADSPA SDK headers (on Mint: libjansson-dev and ladspa-sdk). Run `tests/verify.sh` for the DSP unit test and real OBS post-filter stereo capture test. No model, download, audio device or neural dependency is needed.
+
+## Effect graph runtime
+
+**HyperDSP Graph** is an initial executable serial/parallel effect graph filter. Its versioned JSON definition is editable in OBS filter properties; the graphical Effect Builder is future work. The current graph supports all five Color modes, all five Spectral modes, and a gain/weighted-sum utility. Other native and external effects remain individually usable through their existing filters, but are not yet graph nodes.
+
+The graph has a single audio input (source index -1), up to 16 nodes and 32 weighted edges, and a selected output. It rejects cycles, disconnected nodes, unsupported effects, non-finite/out-of-range parameters and invalid connections. Parallel paths are aligned to the greatest fixed algorithmic latency at each merge, including Color oversampling and Spectral FFT buffering. Valid graphs are prepared off the audio callback and swapped in; an invalid edit retains the previous active graph for that session. The callback processes bounded chunks with preallocated buffers. A valid replacement resets graph state, and an update collision can briefly bypass; there is no crossfade or scene-wide timestamp alignment.
+
+Example: parallel saturated and dry branches. Paste the JSON into the graph filter's properties:
+
+```json
+{
+  "schema": 1,
+  "nodes": [
+    {"effect": "native:hyperdsp_color_filter:1", "params": {"drive": 12, "oversample": 2},
+     "inputs": [{"source": -1, "weight": 1}]},
+    {"effect": "gain", "params": {"gain_db": 0},
+     "inputs": [{"source": 0, "weight": 0.5}, {"source": -1, "weight": 0.5}]}
+  ],
+  "output": 1
+}
+```
+
+Shared Color/Spectral parameter definitions drive OBS controls, graph validation and the effect-library JSON metadata. See [graph contract and verification](docs/effect-graph.md) for limitations and schema.
 
 ## Native filter
 
@@ -116,7 +139,7 @@ build/hyperdsp-effects --search "pitch"
 build/hyperdsp-effects --format ladspa --channels 1 --json
 ```
 
-Search accepts multiple words in any order, and the versioned JSON inventory includes native source/mode keys or local LADSPA path/label, category, description, format, maker and layout/path eligibility. A missing external catalog still leaves native effects discoverable. The tool is installed under `tools/`. It reports metadata only: eligibility is not audio qualification, and a local library path is not a portable effect identifier. The unified graphical library and graph execution are not yet implemented. See [effect library contract](docs/effect-library.md).
+Search accepts multiple words in any order, and the versioned JSON inventory includes native source/mode keys or local LADSPA path/label, category, description, format, maker and layout/path eligibility. A missing external catalog still leaves native effects discoverable. The tool is installed under `tools/`. It reports metadata only: eligibility is not audio qualification, and a local library path is not a portable effect identifier. The unified graphical library is not yet implemented. The first graph runtime supports Color, Spectral and a gain utility; JSON includes graph support flags and parameter metadata. See [effect library contract](docs/effect-library.md).
 
 ### Find and scan external effects
 

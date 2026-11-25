@@ -2,6 +2,7 @@
 #include <obs-module.h>
 #include "framework/dsp/color.hpp"
 #include "framework/obs/route_properties.hpp"
+#include "framework/obs/parameter_properties.hpp"
 #include <memory>
 #include <mutex>
 namespace {
@@ -14,21 +15,17 @@ struct Source {
 };
 ColorSettings read(obs_data_t* s){
     ColorSettings f;
-    auto number=[&](const char* k){return float(obs_data_get_double(s,k));};
     auto mode=obs_data_get_int(s,"mode");f.mode=mode>=0&&mode<=5?ColorMode(mode):ColorMode::Bypass;
-    f.drive=number("drive");f.bits=number("bits");f.reduce=number("reduce");
-    auto os=obs_data_get_int(s,"oversample");f.oversample=os==2||os==4?unsigned(os):1;
-    f.wet=number("mix");f.input_db=number("input_db");f.output_db=number("output_db");
+    obs_parameters::read(s,f,color_parameters);
+    auto os=obs_data_get_int(s,"oversample");f.oversample=valid_oversampling(os)?unsigned(os):1;
     for(unsigned i=0;i<modulation_slots;++i)f.routes[i]=obs_routes::read(s,i,4);
     return f;
 }
 void defaults(obs_data_t* s){
     ColorSettings f;
     obs_data_set_default_int(s,"mode",1);
-    auto set=[&](const char* k,double v){obs_data_set_default_double(s,k,v);};
-    set("drive",f.drive);set("bits",f.bits);set("reduce",f.reduce);
-    obs_data_set_default_int(s,"oversample",1);
-    set("mix",f.wet);set("input_db",f.input_db);set("output_db",f.output_db);
+    obs_parameters::defaults(s,f,color_parameters);
+    obs_data_set_default_int(s,"oversample",f.oversample);
     obs_routes::defaults(s);
 }
 void update(void* ptr,obs_data_t* s){
@@ -55,20 +52,14 @@ obs_properties_t* properties(void*){
     auto* p=obs_properties_create();
     auto* mode=obs_properties_add_list(p,"mode","Color effect",OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_INT);
     hyperdsp::add_native_modes(mode,hyperdsp::color_modes);
-    auto slider=[&](const char* k,const char* n,double lo,double hi,double step,const char* unit=nullptr){
-        auto* prop=obs_properties_add_float_slider(p,k,n,lo,hi,step);if(unit)obs_property_float_set_suffix(prop,unit);return prop;
-    };
-    slider("drive","Drive",-24,36,.1," dB");
-    slider("bits","Bit depth",2,16,1," bits");
-    slider("reduce","Sample hold",1,64,1," samples");
+    for(unsigned i=0;i<3;++i)obs_parameters::add(p,color_parameters[i]);
     auto* oversample=obs_properties_add_list(p,"oversample","Oversampling",OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_INT);
-    obs_property_list_add_int(oversample,"Off (1×)",1);
-    obs_property_list_add_int(oversample,"2×",2);
-    obs_property_list_add_int(oversample,"4×",4);
+    for(auto factor:oversampling_choices){
+        const auto label=factor==1?std::string("Off (1×)"):std::to_string(factor)+"×";
+        obs_property_list_add_int(oversample,label.c_str(),factor);
+    }
     obs_property_set_long_description(oversample,"Filtered interpolation and decimation, 24 samples of latency with aligned dry branch. Not compensated across OBS sources. Disabled for bitcrusher.");
-    slider("input_db","Input gain",-24,24,.1," dB");
-    slider("mix","Wet / dry",0,1,.01);
-    slider("output_db","Output gain",-24,24,.1," dB");
+    for(unsigned i=3;i<std::size(color_parameters);++i)obs_parameters::add(p,color_parameters[i]);
     obs_routes::add(p,{"Drive (dB)","Bit depth","Sample hold (samples)","Wet / dry","Output amplitude"},
         "Signed amount in destination units. Drive ±60 dB, bit depth ±14, sample hold ±63, mix/output ±1 per route. Summed before bounds.");
     obs_property_set_modified_callback(mode,visibility);return p;
