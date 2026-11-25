@@ -59,6 +59,14 @@ Add **HyperDSP Space** for a swept 2–12-stage all-pass phaser or stereo algori
 
 Both modes support the four shared reactive routes, input/output gain and wet/dry mixing. Modulation destinations include phaser center/depth/rate/feedback and reverb decay/damping/pre-delay/size, plus width, mix and output amplitude. Only destinations applicable to the selected mode affect processing. Changing mode or stage count clears state; room-size changes retime integer taps and can produce audible discontinuities. Continuous base controls ramp over 10 ms. No convolution, measured room presets, tail-preserving bypass or live CPU qualification yet. See [space effects verification](docs/space-effects.md).
 
+## Native spectral effects
+
+Add **HyperDSP Spectral** for frequency-bin gating, phase-advancing spectral freeze, and temporal spectral smearing. The shared FFT engine uses 1024-sample periodic Hann analysis/synthesis windows with 75% overlap and normalized overlap-add. Active modes have 1024 samples of latency (about 21.33 ms at 48 kHz), including the internally aligned dry branch. Unprocessed bypass is undelayed; OBS-wide compensation is not implemented.
+
+The gate attenuates bins below a peak-amplitude threshold calibrated for bin-centered sine waves, with adjustable attenuation and opening/closing time constants. It is not a learned noise suppressor or adaptive noise profile. Freeze captures the next analysis frame when hold crosses 0.5, preserving magnitudes and measured inter-frame phase advances until release. Smear averages spectral magnitudes over time, using live phase while a bin is significant and continuing its last estimated phase advance when quiet. It creates spectral trails, not an ordinary echo. Stereo channels have independent spectral state.
+
+Four reactive routes target threshold, attenuation, freeze hold, spectral memory time, mix and output amplitude. Spectral parameters are sampled at analysis hops; the shared mixer runs per sample. Optional Sound and Sight inputs remain supported. Mode changes reset spectral history; no crossfade or tail preservation. See [spectral verification](docs/spectral-effects.md).
+
 ## LADSPA filter
 
 Add **HyperDSP LADSPA** to an audio source. Search the effect catalog by name, label or maker, narrow by category, and choose an effect from the native OBS properties. Switching catalog effects clears the previous effect's port values so the new effect starts at its own defaults. Manual trusted library path and exact label (for example, `/usr/lib/ladspa/amp.so` and `amp_stereo`) remain available. The filter generates numeric and toggle controls from port metadata. Mono effects use independent instances per OBS audio channel; stereo effects require a stereo OBS layout. Only equal-input/output mono or stereo effects declaring hard-real-time capability are accepted. Unsupported configurations, missing libraries and invalid labels bypass audio.
