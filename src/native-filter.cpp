@@ -21,6 +21,7 @@ FilterSettings read(obs_data_t* s){
     f.mode=FilterMode(enumeration("mode",9,0));
     f.frequency=number("frequency");f.q=number("q");
     f.gain_db=number("gain_db");f.comb_depth=number("comb_depth");
+    f.alignment=FilterAlignment(enumeration("alignment",1,0));
     f.stages=unsigned(std::clamp(obs_data_get_int(s,"stages"),1LL,4LL));
     f.wet=number("mix");f.input_db=number("input_db");f.output_db=number("output_db");
     f.source=ModSource(enumeration("mod_source",2,0));f.target=ModTarget(enumeration("mod_target",4,0));
@@ -30,7 +31,7 @@ FilterSettings read(obs_data_t* s){
     return f;
 }
 void defaults(obs_data_t* s){
-    obs_data_set_default_int(s,"mode",1);obs_data_set_default_int(s,"stages",1);
+    obs_data_set_default_int(s,"mode",1);obs_data_set_default_int(s,"stages",1);obs_data_set_default_int(s,"alignment",0);
     obs_data_set_default_double(s,"frequency",1000);obs_data_set_default_double(s,"q",.70710678);
     obs_data_set_default_double(s,"gain_db",0);obs_data_set_default_double(s,"comb_depth",1);
     obs_data_set_default_double(s,"mix",1);obs_data_set_default_double(s,"input_db",0);obs_data_set_default_double(s,"output_db",0);
@@ -56,7 +57,10 @@ bool visibility(obs_properties_t* p,obs_property_t*,obs_data_t* s){
     const auto mode=obs_data_get_int(s,"mode");
     const auto source=obs_data_get_int(s,"mod_source");
     auto show=[&](const char* k,bool yes){if(auto* prop=obs_properties_get(p,k))obs_property_set_visible(prop,yes);};
-    show("q",(mode>=1&&mode<=5)||mode==9);
+    const bool cascade=mode==1||mode==2;
+    const bool butterworth=cascade&&obs_data_get_int(s,"alignment")==1;
+    show("q",!butterworth&&((mode>=1&&mode<=5)||mode==9));
+    show("alignment",cascade);
     show("stages",mode==1||mode==2);
     show("gain_db",mode>=5&&mode<=7);show("comb_depth",mode==8);
     show("frequency",mode!=0);
@@ -83,7 +87,10 @@ obs_properties_t* properties(void*){
     slider("q","Resonance (Q)",.25,12,.01);
     auto* stages=obs_properties_add_list(p,"stages","Slope",OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_INT);
     for(int i=1;i<=4;++i){auto text=std::to_string(i*12)+" dB/oct";obs_property_list_add_int(stages,text.c_str(),i);}
-    obs_property_set_long_description(stages,"Cascades identical second-order sections. Q applies per section, so high resonance can compound.");
+    auto* alignment=list("alignment","Response",{"Resonant cascade","Butterworth (flat passband)"});
+    obs_property_set_long_description(alignment,"Butterworth keeps the cutoff at -3.01 dB for every slope, with fixed per-stage Q. Resonant cascade uses the adjustable Q for each section.");
+    obs_property_set_long_description(stages,"Choose slope in either alignment.");
+    obs_property_set_modified_callback(alignment,visibility);
     slider("gain_db","EQ gain",-24,24,.1," dB");
     slider("comb_depth","Comb depth",0,1,.01);
     slider("input_db","Input gain",-24,24,.1," dB");
@@ -94,7 +101,7 @@ obs_properties_t* properties(void*){
     list("wave_shape","Waveform",{"Sine","Triangle","Square","Saw"});
     slider("lfo_rate","LFO rate",.05,20,.05," Hz");
     auto* depth=slider("mod_depth","Modulation depth",0,1,.01);
-    obs_property_set_long_description(depth,"At full depth: cutoff ±4 octaves, Q ±2 octaves, EQ gain ±12 dB, wet/dry ±1, or output amplitude ×(1 + modulation). Envelope is positive-only.");
+    obs_property_set_long_description(depth,"At full depth: cutoff ±4 octaves, Q ±2 octaves (not in Butterworth), EQ gain ±12 dB, wet/dry ±1, or output amplitude ×(1 + modulation). Envelope is positive-only.");
     slider("attack_ms","Envelope attack",1,200,1," ms");
     slider("release_ms","Envelope release",10,2000,10," ms");
     obs_property_set_modified_callback(mode,visibility);

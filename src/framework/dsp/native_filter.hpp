@@ -6,6 +6,7 @@
 
 namespace hyperdsp {
 enum class FilterMode { Bypass, LowPass, HighPass, BandPass, Notch, Peak, LowShelf, HighShelf, Comb, AllPass };
+enum class FilterAlignment { Resonant, Butterworth };
 enum class ModSource { Off, Lfo, Envelope };
 enum class ModTarget { Cutoff, Resonance, Gain, Mix, Output };
 enum class WaveShape { Sine, Triangle, Square, Saw };
@@ -13,6 +14,7 @@ struct FilterSettings {
     FilterMode mode=FilterMode::LowPass;
     float frequency=1000,q=.70710678f,gain_db=0,comb_depth=1;
     unsigned stages=1;
+    FilterAlignment alignment=FilterAlignment::Resonant;
     float wet=1,input_db=0,output_db=0;
     ModSource source=ModSource::Off;
     ModTarget target=ModTarget::Cutoff;
@@ -80,7 +82,8 @@ class NativeFilter {
     MixModulator mixer_;
     unsigned rate_=48000,ramp_=480;
     double phase_=0;
-    SvfCoefficients cached_{};
+    std::array<SvfCoefficients,stages_> cached_{};
+    std::array<double,stages_> stage_q_{};
     FilterMode cached_mode_=FilterMode::Bypass;
     float cached_hz_=0,cached_q_=0,cached_gain_=0;
     float envelope_=0,attack_=0,release_=0,current_hz_=1000;
@@ -96,7 +99,10 @@ class NativeFilter {
         s.gain_db=bound(s.gain_db,-24,24,0);
         s.comb_depth=bound(s.comb_depth,0,1,1);
         s.stages=std::clamp(s.stages,1u,4u);
-        if(s.mode!=FilterMode::LowPass&&s.mode!=FilterMode::HighPass)s.stages=1;
+        if(s.mode!=FilterMode::LowPass&&s.mode!=FilterMode::HighPass){
+            s.stages=1;s.alignment=FilterAlignment::Resonant;
+        }
+        if(s.alignment!=FilterAlignment::Butterworth)s.alignment=FilterAlignment::Resonant;
         s.hz=bound(s.hz,.05,20,1);
         s.depth=bound(s.depth,0,1,0);
         s.attack_ms=bound(s.attack_ms,1,200,10);
@@ -106,6 +112,11 @@ class NativeFilter {
     void set_envelope_coefficients(){
         attack_=float(std::exp(-1000./(rate_*double(settings_.attack_ms))));
         release_=float(std::exp(-1000./(rate_*double(settings_.release_ms))));
+    }
+    void prepare_alignment(){
+        for(unsigned k=0;k<settings_.stages;++k)
+            stage_q_[k]=1./(2.*std::cos(std::numbers::pi*(double(k)+.5)/(2.*settings_.stages)));
+        cached_mode_=FilterMode::Bypass;
     }
     void clear_state(){
         for(auto& v:voices_){v.state={};v.delay.fill(0);v.pos=0;}
@@ -130,7 +141,7 @@ class NativeFilter {
 public:
     void reset(unsigned rate,FilterSettings s){
         rate_=std::clamp(rate,8000u,192000u);ramp_=std::max(1u,rate_/100);
-        settings_=sanitize(s);clear_state();phase_=0;envelope_=0;cached_mode_=FilterMode::Bypass;cached_hz_=0;
+        settings_=sanitize(s);clear_state();phase_=0;envelope_=0;prepare_alignment();cached_hz_=0;
         frequency_.reset(std::log2(settings_.frequency));q_.reset(std::log2(settings_.q));
         gain_.reset(settings_.gain_db);depth_.reset(settings_.depth);
         comb_.reset(settings_.comb_depth);
@@ -139,8 +150,10 @@ public:
     }
     void set(FilterSettings s){
         s=sanitize(s);
-        if(s.mode!=settings_.mode||s.stages!=settings_.stages)clear_state();
+        const bool topology_changed=s.mode!=settings_.mode||s.stages!=settings_.stages||s.alignment!=settings_.alignment;
+        if(topology_changed)clear_state();
         settings_=s;
+        if(topology_changed)prepare_alignment();
         frequency_.set(std::log2(s.frequency),ramp_);q_.set(std::log2(s.q),ramp_);
         gain_.set(s.gain_db,ramp_);comb_.set(s.comb_depth,ramp_);depth_.set(s.depth,ramp_);
         mixer_.set(MixSettings::from(s.wet,s.input_db,s.output_db),{});
@@ -164,14 +177,16 @@ public:
             case ModTarget::Output:mix.output_gain*=1+mod;break;
             }
             current_hz_=std::clamp(std::exp2(freq),20.f,max_hz());
-            const float resonance=std::clamp(std::exp2(q),.25f,12.f);
+            const float resonance=settings_.alignment==FilterAlignment::Butterworth?0.f:std::clamp(std::exp2(q),.25f,12.f);
             gain=std::clamp(gain,-24.f,24.f);
             const auto mode=settings_.mode;
             const float amount=comb_.next();
             if(mode==FilterMode::Bypass)continue;
             if(mode!=FilterMode::Comb &&
                 (cached_mode_!=mode||cached_hz_!=current_hz_||cached_q_!=resonance||cached_gain_!=gain)){
-                cached_=SvfCoefficients::design(mode,rate_,current_hz_,resonance,gain);
+                for(unsigned k=0;k<settings_.stages;++k)
+                    cached_[k]=SvfCoefficients::design(mode,rate_,current_hz_,
+                        settings_.alignment==FilterAlignment::Butterworth?stage_q_[k]:resonance,gain);
                 cached_mode_=mode;cached_hz_=current_hz_;cached_q_=resonance;cached_gain_=gain;
             }
             const float delay=std::clamp(float(rate_)/current_hz_,1.f,float(delay_size_-2));
@@ -181,7 +196,7 @@ public:
                 const float in=mix.input(dry);
                 float wet=in;
                 if(mode==FilterMode::Comb)wet=voices_[c].comb(in,delay,amount);
-                else for(unsigned k=0;k<settings_.stages;++k)wet=voices_[c].state[k].run(wet,cached_);
+                else for(unsigned k=0;k<settings_.stages;++k)wet=voices_[c].state[k].run(wet,cached_[k]);
                 buffers[c][i]=mix.output(dry,in,wet);
             }
         }

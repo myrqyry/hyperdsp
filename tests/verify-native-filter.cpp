@@ -37,6 +37,22 @@ int main(){
         bp_center>.98&&bp_center<1.02&&bp_low<.16&&notch<.002&&
         peak>1.97&&peak<2.02&&ls_low>1.95&&ls_high>.98&&ls_high<1.03&&
         hs_high>1.95&&hs_low>.98&&hs_low<1.03&&comb_notch<.002&&comb_pass>.98&&allpass>.98&&allpass<1.02;
+    // Independent Wolfram reference: prewarped Butterworth responses at 48 kHz.
+    const double stop_db[]={-37.7971208948659,-75.5927993349442,-113.389198822716,-151.185598430262};
+    for(unsigned n=1;n<=4;++n){
+        FilterSettings b;b.stages=n;b.frequency=1000;b.alignment=FilterAlignment::Butterworth;
+        auto lp=response(b,1000),stop=response(b,8000);
+        b.mode=FilterMode::HighPass;
+        auto hp=response(b,1000),passband=response(b,8000);
+        ok=ok&&std::abs(lp-std::sqrt(.5))<.0001&&std::abs(hp-std::sqrt(.5))<.0001&&
+            std::abs(20*std::log10(stop)-stop_db[n-1])<.05&&passband>.999;
+        // Fixed-Q alignment must not silently become a resonant cascade.
+        b.q=12;b.target=ModTarget::Resonance;b.source=ModSource::Lfo;b.depth=1;
+        ok=ok&&std::abs(response(b,1000)-std::sqrt(.5))<.0001;
+        std::printf("BUTTERWORTH order=%u cutoff_lp=%g cutoff_hp=%g stop_db=%g\n",2*n,lp,hp,20*std::log10(stop));
+    }
+    FilterSettings old;old.stages=4;
+    ok=ok&&std::abs(response(old,1000)-.25)<.0001;
     // Channel independence, finite bounded settings, live modulation.
     NativeFilter f;s=FilterSettings{};s.mode=FilterMode::LowPass;s.frequency=1000;
     f.reset(sr,s);

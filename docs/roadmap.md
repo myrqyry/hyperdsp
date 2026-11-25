@@ -5,7 +5,7 @@ Standalone conventional audio effects and hosting for OBS, with optional inputs 
 ## Verified foundation
 
 - Mic DSP extraction (coordinated production migration still pending).
-- Native low/high/band-pass, notch, peak, shelves, comb, all-pass; 12–48 dB/oct cascades for low/high-pass.
+- Native low/high/band-pass, notch, peak, shelves, comb, all-pass; 12–48 dB/oct resonant and normalized Butterworth cascades for low/high-pass.
 - Native filter LFO and peak-envelope cutoff/Q/gain/mix/output bindings (one source/destination).
 - LADSPA hosting, searchable categorized catalog and parameter controls.
 - Shared wet/dry, input/output gain and smoothing for mixer controls.
