@@ -60,7 +60,7 @@ inline constexpr NativeMode formant_modes[]={
     {1,"Vowel morph","Resonators","Interpolate illustrative vowel resonances"},
     {2,"Custom resonator bank","Resonators","Three independently tunable bands"}};
 inline constexpr NativeFamily native_families[]={
-    {"mic_modeler_filter","HyperDSP Microphone DSP","mic_type",mic_modes},
+    {"hyperdsp_mic_filter","HyperDSP Microphone DSP","mic_type",mic_modes},
     {"hyperdsp_native_filter","HyperDSP Filter","mode",filter_modes},
     {"hyperdsp_dynamics_filter","HyperDSP Dynamics","mode",dynamics_modes},
     {"hyperdsp_color_filter","HyperDSP Color","mode",color_modes},
@@ -82,7 +82,7 @@ struct EffectEntry {
 inline std::vector<EffectEntry> effect_library(const Catalog& catalog,unsigned channels){
     std::vector<EffectEntry> entries;std::set<std::string> ids;
     for(auto& family:native_families)for(auto& m:family.modes)if(m.value){
-        EffectEntry e;e.id=std::string("native:")+family.source+":"+std::to_string(m.value);
+        EffectEntry e;e.id=std::string("native:")+(std::string_view(family.source)=="hyperdsp_mic_filter"?"mic_modeler_filter":family.source)+":"+std::to_string(m.value);
         e.name=m.name;e.category=m.category;e.description=m.description;e.format="native";
         e.source=family.source;e.mode_key=family.mode_key;e.mode=m.value;e.maker="HyperDSP";
         e.compatible=channels>=1&&channels<=8;

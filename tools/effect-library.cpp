@@ -49,7 +49,7 @@ void graph_metadata(obs_data_t* item,const hyperdsp::EffectEntry& e,unsigned rat
         choice_parameter(params,"oversample","Oversampling",1,oversampling_choices);
     }else if(e.source=="hyperdsp_spectral_filter"){
         parameter_list(params,SpectralSettings{},spectral_parameters);
-    }else if(e.source=="mic_modeler_filter"){
+    }else if(e.source=="hyperdsp_mic_filter"){
         parameter_list(params,MicSettings{},mic_parameters);
     }else if(e.source=="hyperdsp_native_filter"){
         parameter_list(params,FilterSettings{},native_parameters);

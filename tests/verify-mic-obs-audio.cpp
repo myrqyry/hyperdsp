@@ -77,14 +77,15 @@ int main(int argc,char**argv) {
         return obs_open_module(&module,binary,data)==MODULE_SUCCESS && obs_init_module(module);
     };
     auto owns_mic = [] {
-        const char* name = obs_source_get_display_name("mic_modeler_filter");
+        const char* name = obs_source_get_display_name("hyperdsp_mic_filter");
         return name && std::strcmp(name,"HyperDSP Microphone DSP")==0;
     };
     if(argc==6 && std::strcmp(argv[5],"sound-first")!=0)return 2;
     if(argc==6 && !load(argv[3],argv[4]))return 5;
-    if(argc==6 && obs_get_source_output_flags("mic_modeler_filter")!=0)return 7;
+    if(argc==6 && obs_get_source_output_flags("hyperdsp_mic_filter")!=0)return 7;
     if(!load(argv[1],argv[2]))return 5;
     if(!owns_mic())return 8;
+    if(argc==3 && obs_get_source_output_flags("mic_modeler_filter")!=0)return 10;
     if(argc==5 && !load(argv[3],argv[4]))return 5;
     if(argc>=5 && (!obs_get_source_output_flags("yamnet_classifier_source") ||
         !owns_mic()))return 9;
@@ -92,9 +93,9 @@ int main(int argc,char**argv) {
     auto* source=obs_source_create("test_mic_audio_generator","tone",nullptr,nullptr);
     auto* settings=obs_data_create();
     obs_data_set_int(settings,"mic_type",0);
-    auto* filter=obs_source_create("mic_modeler_filter","mic-test",settings,nullptr);
+    auto* filter=obs_source_create("hyperdsp_mic_filter","mic-test",settings,nullptr);
     if(!source||!filter)return 6;
-    obs_properties_t* props=obs_get_source_properties("mic_modeler_filter");
+    obs_properties_t* props=obs_get_source_properties("hyperdsp_mic_filter");
     obs_property_t* preset=props ? obs_properties_get(props,"mic_type") : nullptr;
     const bool properties_ok=props && preset &&
         obs_property_list_item_count(preset)==7 &&

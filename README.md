@@ -184,11 +184,11 @@ The scanner atomically writes `ladspa-catalog.json` in the module configuration 
 
 ## Migration status
 
-This development module retains the existing OBS source ID `mic_modeler_filter` and settings keys to preserve scene compatibility. **Do not install or load it alongside a Sound build registering the same ID.** The old module remains unchanged until a coordinated migration verifies both modules together. No changes to installed OBS plugins or scene collections are required for testing.
+HyperDSP registers its own standalone microphone source ID `hyperdsp_mic_filter`, retaining the settings keys and existing graph effect IDs. Sound can keep its historical `mic_modeler_filter` while existing scenes remain unchanged. This avoids a registration collision irrespective of load order.
 
 Run `tests/verify-coexist.sh /path/to/live-latent-lab-sound-public` to build a committed Sound snapshot with only YAMNet enabled, then verify both module load orders and real stereo processing with the original filter ID. This tests coexistence, not the entire expanded neural stack.
 
-The production migration must remove Mic DSP from Sound's enabled effect sets, registration, verification receipts and installer checks together, requalify the expanded build, and install both modules while OBS is closed. Do not replace a running module or publish a second registration.
+Removing the old Mic DSP implementation from Sound still requires coordinated scene migration and Sound verification. Do not replace running modules.
 
 ## Direction
 

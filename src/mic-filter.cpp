@@ -104,7 +104,7 @@ obs_audio_data* filter_audio(void* ptr, obs_audio_data* frame) {
 
 extern "C" {
 struct obs_source_info mic_filter = {
-    .id = "mic_modeler_filter",
+    .id = "hyperdsp_mic_filter",
     .type = OBS_SOURCE_TYPE_FILTER,
     .output_flags = OBS_SOURCE_AUDIO,
     .get_name = get_name,

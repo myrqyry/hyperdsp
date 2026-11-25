@@ -39,7 +39,7 @@ int main(int argc,char** argv){
     };
     ok=ok&&parity("hyperdsp_color_filter",hyperdsp::ColorSettings{},hyperdsp::color_parameters)&&
         parity("hyperdsp_spectral_filter",hyperdsp::SpectralSettings{},hyperdsp::spectral_parameters)&&
-        parity("mic_modeler_filter",hyperdsp::MicSettings{},hyperdsp::mic_parameters)&&
+        parity("hyperdsp_mic_filter",hyperdsp::MicSettings{},hyperdsp::mic_parameters)&&
         parity("hyperdsp_native_filter",hyperdsp::FilterSettings{},hyperdsp::native_parameters)&&
         parity("hyperdsp_dynamics_filter",hyperdsp::DynamicsSettings{},hyperdsp::dynamics_parameters)&&
         parity("hyperdsp_time_filter",hyperdsp::TimeSettings{},hyperdsp::time_parameters)&&
