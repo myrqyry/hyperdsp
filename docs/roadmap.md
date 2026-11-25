@@ -43,6 +43,8 @@ Standalone conventional audio effects and hosting for OBS, with optional inputs 
 
 - Sample-clocked graph reactive routes to exposed macros with 64-sample control updates; existing Sound/Sight subscription integration and fallback.
 
+- Per-filter accepted graph recovery using OBS source saves; revalidation on creation, rejected draft retention, explicit restoration and actual libobs serialization/audio regression.
+
 ## Next layers
 
 - Unified discoverable effect library: favorites, native/installed external/community definitions, backend compatibility, descriptions, safe explicit acquisition and reusable presets. Reset/import/export and a compact native frequency-response view.

@@ -321,6 +321,11 @@ public:
         return true;
     }
     const std::vector<GraphControl>& controls()const{return controls_;}
+    Parameters base_values()const{
+        Parameters result;
+        for(unsigned i=0;i<controls_.size();++i)result.emplace(controls_[i].id,values_[i]);
+        return result;
+    }
     bool set_controls(const Parameters& updates,std::string& error){
         error.clear();auto next=values_;
         if(!resolve_values(updates,next,error))return false;

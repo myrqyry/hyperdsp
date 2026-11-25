@@ -131,44 +131,113 @@ Parameters control_values(obs_data_t* settings,const std::vector<GraphControl>& 
     }
     return values;
 }
+constexpr const char* recovery_key="graph_last_good";
+struct Candidate {
+    std::unique_ptr<PreparedGraph> graph;
+    ExternalInputs external;
+};
+Candidate prepare(const std::string& raw,unsigned rate,unsigned channels,obs_data_t* settings,
+                  std::string& error,const Parameters* recovered=nullptr){
+    Candidate candidate;
+    GraphSpec spec;
+    try{
+        if(!parse(raw,spec,error))return candidate;
+        std::vector<std::string> allowed;
+        if(std::any_of(spec.nodes.begin(),spec.nodes.end(),[](auto& n){return n.effect.starts_with("ladspa:");}))
+            for(auto& e:read_catalog())allowed.push_back("ladspa:"+e.id());
+        if(recovered&&recovered->size()!=spec.controls.size()){
+            error="Recovery control set does not match graph";return candidate;
+        }
+        auto values=recovered?*recovered:control_values(settings,spec.controls);
+        candidate.graph=PreparedGraph::prepare(spec,rate,channels,error,allowed,values);
+        if(candidate.graph)for(unsigned i=0;i<spec.routes.size();++i){
+            const auto& r=spec.routes[i];
+            candidate.external.configure(i,r.config.source,r.channel.c_str(),r.category.c_str());
+        }
+    }catch(const std::exception& ex){candidate.graph.reset();error=ex.what();}
+    return candidate;
+}
+bool read_recovery(obs_data_t* settings,std::string& raw,Parameters& values,std::string& error){
+    auto* snapshot=obs_data_get_obj(settings,recovery_key);
+    if(!snapshot){error="No saved accepted graph";return false;}
+    std::unique_ptr<obs_data_t,decltype(&obs_data_release)> hold(snapshot,obs_data_release);
+    const char* serialized=obs_data_get_json(snapshot);
+    if(!serialized||std::strlen(serialized)>400000){error="Invalid recovery size";return false;}
+    auto root=std::unique_ptr<json_t,decltype(&json_decref)>(json_loads(serialized,JSON_REJECT_DUPLICATES,nullptr),json_decref);
+    auto* j=root.get();int schema=0;
+    if(!j||!keys(j,{"schema","graph","values"})||!integer(json_object_get(j,"schema"),schema)||schema!=1){
+        error="Invalid recovery schema";return false;
+    }
+    auto* graph=json_object_get(j,"graph");auto* controls=json_object_get(j,"values");
+    if(!json_is_string(graph)||json_string_length(graph)>65536||!json_is_object(controls)||json_object_size(controls)>8){
+        error="Invalid recovery graph or values";return false;
+    }
+    const char* key;json_t* value;
+    json_object_foreach(controls,key,value){
+        if(!graph_control_id(key)||!json_is_number(value)||!std::isfinite(json_number_value(value))||
+           json_number_value(value)<0||json_number_value(value)>1){
+            error="Invalid recovery control";return false;
+        }
+        values.emplace(key,json_number_value(value));
+    }
+    raw=json_string_value(graph);return true;
+}
+void save(void* ptr,obs_data_t* settings){
+    auto* f=static_cast<Source*>(ptr);if(!f||!settings)return;
+    std::string graph;Parameters values;
+    {
+        std::lock_guard lock(f->mutex);
+        if(!f->active)return; // preserve an existing recovery record if neither graph could load
+        graph=f->accepted;values=f->active->base_values();
+    }
+    auto* snapshot=obs_data_create();auto* controls=obs_data_create();
+    obs_data_set_int(snapshot,"schema",1);obs_data_set_string(snapshot,"graph",graph.c_str());
+    for(auto& [key,value]:values)obs_data_set_double(controls,key.c_str(),value);
+    obs_data_set_obj(snapshot,"values",controls);obs_data_release(controls);
+    obs_data_set_obj(settings,recovery_key,snapshot);obs_data_release(snapshot);
+}
 void update(void* ptr,obs_data_t* settings){
     auto* f=static_cast<Source*>(ptr);if(!f)return;
     std::unique_lock control(f->control);
     obs_audio_info ai{};if(!obs_get_audio_info(&ai))return;
     const unsigned rate=ai.samples_per_sec,channels=get_audio_channels(ai.speakers);
     const std::string raw=obs_data_get_string(settings,"graph_json");
+    bool has_active=false;
     {
         std::lock_guard lock(f->mutex);
+        has_active=bool(f->active);
         if(f->active&&f->accepted==raw&&f->rate==rate&&f->channels==channels){
             auto values=control_values(settings,f->active->controls());
             if(!f->active->set_controls(values,f->error))blog(LOG_WARNING,"[HyperDSP Graph] Rejected control values: %s",f->error.c_str());
             return;
         }
     }
-    GraphSpec spec;std::string error;
-    std::unique_ptr<PreparedGraph> next;
-    ExternalInputs external;
-    try{if(parse(raw,spec,error)){
-        std::vector<std::string> allowed;
-        if(std::any_of(spec.nodes.begin(),spec.nodes.end(),[](auto& n){return n.effect.starts_with("ladspa:");}))
-            for(auto& e:read_catalog())allowed.push_back("ladspa:"+e.id());
-        next=PreparedGraph::prepare(spec,rate,channels,error,allowed,control_values(settings,spec.controls));
-        if(next)for(unsigned i=0;i<spec.routes.size();++i){
-            const auto& r=spec.routes[i];external.configure(i,r.config.source,r.channel.c_str(),r.category.c_str());
+    std::string accepted=raw,error;
+    auto next=prepare(raw,rate,channels,settings,error);
+    bool recovered=false;
+    if(!next.graph&&!has_active){
+        std::string recovery_error,recovery_graph;
+        Parameters values;
+        if(read_recovery(settings,recovery_graph,values,recovery_error)){
+            next=prepare(recovery_graph,rate,channels,settings,recovery_error,&values);
+            if(next.graph){accepted=std::move(recovery_graph);recovered=true;}
         }
-    }}
-    catch(const std::exception& ex){next.reset();error=ex.what();}
-    if(!next){
+        if(recovered)error="Recovered last saved accepted graph. Rejected draft: "+error;
+        else error+="; recovery unavailable: "+recovery_error;
+    }
+    if(!next.graph){
         {std::lock_guard lock(f->mutex);f->error=error;}
         blog(LOG_WARNING,"[HyperDSP Graph] Rejected graph: %s",error.c_str());return;
     }
-    for(auto& c:spec.controls)obs_data_set_default_double(settings,control_key(c).c_str(),c.initial);
+    for(auto& c:next.graph->controls())obs_data_set_default_double(settings,control_key(c).c_str(),c.initial);
     bool refresh=false;
     {
         std::lock_guard lock(f->mutex);
-        refresh=bool(f->active)&&f->accepted!=raw;
-        f->active.swap(next);std::swap(f->external,external);f->rate=rate;f->channels=channels;f->accepted=raw;f->error.clear();
+        refresh=bool(f->active)&&f->accepted!=accepted;
+        f->active.swap(next.graph);std::swap(f->external,next.external);
+        f->rate=rate;f->channels=channels;f->accepted=std::move(accepted);f->error=std::move(error);
     }
+    if(recovered)blog(LOG_WARNING,"[HyperDSP Graph] Recovered last saved accepted graph; draft left unchanged");
     control.unlock();
     if(refresh&&f->source)obs_source_update_properties(f->source);
 }
@@ -176,12 +245,31 @@ void defaults(obs_data_t* s){obs_data_set_default_string(s,"graph_json",empty_gr
 void* create(obs_data_t* s,obs_source_t* source){auto p=std::make_unique<Source>();p->source=source;update(p.get(),s);return p.release();}
 void destroy(void* p){delete static_cast<Source*>(p);}
 const char* name(void*){return "HyperDSP Graph";}
+bool restore_working_graph(obs_properties_t*,obs_property_t*,void* ptr){
+    auto* f=static_cast<Source*>(ptr);if(!f||!f->source)return false;
+    std::string graph;Parameters values;
+    {
+        std::lock_guard lock(f->mutex);
+        if(!f->active)return false;
+        graph=f->accepted;values=f->active->base_values();
+    }
+    auto* settings=obs_source_get_settings(f->source);
+    if(!settings)return false;
+    obs_data_set_string(settings,"graph_json",graph.c_str());
+    for(auto& [id,value]:values)obs_data_set_double(settings,("graph_control_"+id).c_str(),value);
+    obs_source_update(f->source,settings);obs_data_release(settings);
+    return true;
+}
 obs_properties_t* properties(void* p){
     auto* props=obs_properties_create();
     auto* json=obs_properties_add_text(props,"graph_json","Effect graph (schema 1)",OBS_TEXT_MULTILINE);
-    std::string status="All native effects, gain and explicitly scanned trusted LADSPA nodes. External latency is unknown. Invalid edits retain the previous active graph in this session.";
+    std::string status="All native effects, gain and explicitly scanned trusted LADSPA nodes. External latency is unknown. Invalid edits retain the active graph. Scene saves preserve its last accepted definition and base controls for recovery.";
     if(p){
         auto* f=static_cast<Source*>(p);std::lock_guard lock(f->mutex);
+        if(f->active){
+            auto* restore=obs_properties_add_button2(props,"restore_working_graph","Restore working graph",restore_working_graph,f);
+            obs_property_set_long_description(restore,"Replace the draft and its exposed control values with the currently accepted graph. Does not rebuild an unchanged graph.");
+        }
         if(f->active)for(auto& c:f->active->controls()){
             auto key=control_key(c);
             auto* slider=obs_properties_add_float_slider(props,key.c_str(),c.name.c_str(),0,1,.01);
@@ -206,6 +294,6 @@ obs_audio_data* process(void* ptr,obs_audio_data* audio){
 extern "C" {
 struct obs_source_info graph_filter={
     .id="hyperdsp_graph_filter",.type=OBS_SOURCE_TYPE_FILTER,.output_flags=OBS_SOURCE_AUDIO,
-    .get_name=name,.create=create,.destroy=destroy,.get_defaults=defaults,.get_properties=properties,.update=update,.filter_audio=process
+    .get_name=name,.create=create,.destroy=destroy,.get_defaults=defaults,.get_properties=properties,.update=update,.filter_audio=process,.save=save
 };
 }
