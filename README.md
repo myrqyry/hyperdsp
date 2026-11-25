@@ -19,6 +19,16 @@ The first verified target is the microphone coloration filter: dynamic, condense
 
 Requires a C++20 compiler, CMake, OBS development headers, libobs, and LADSPA SDK headers (on Mint: ladspa-sdk). Run `tests/verify.sh` for the DSP unit test and real OBS post-filter stereo capture test. No model, download, audio device or neural dependency is needed.
 
+## Native filter
+
+Add **HyperDSP Filter** to an OBS audio source. The native topology-preserving state-variable engine provides low-pass, high-pass, band-pass, notch, peaking EQ, low/high shelves and all-pass, plus a fractional-delay feedforward comb and bypass. It has independent state per channel and shares parameter changes across channels. Low/high-pass cascades offer 12, 24, 36 and 48 dB/octave asymptotic slopes; these are identical second-order stages, not a normalized high-order Butterworth design. Q is per stage; shelves use fixed slope. Comb frequency sets notch spacing, depth controls cancellation.
+
+Frequency (20–20,000 Hz, capped at 45% of sample rate), Q (0.25–12), EQ gain (±24 dB) and comb depth ramp over 10 ms. Input/output gain and wet/dry use the shared mixer; bypass is unprocessed audio. Mode and stage changes reset filter state, not crossfade. Supported sample rates are 8–192 kHz; unsupported or changed OBS audio formats bypass until reconfigured. This is conventional deterministic DSP with no inference dependencies.
+
+Native modulation supports sine, triangle, square and saw LFOs (0.05–20 Hz), and a linked pre-trim peak-envelope follower with independent attack/release. One source can bind to cutoff (±4 octaves), Q (±2 octaves), EQ gain (±12 dB), wet/dry or output amplitude. Envelope modulation is positive-only; source, destination and waveform changes are not crossfaded. For auto-wah, select low-pass or band-pass, a low cutoff, input envelope as source, cutoff as destination and increase depth. Filter effects can be chained using OBS's ordinary filter stack. Dedicated parallel chains, arbitrary routing, oversampling and a live frequency-response graph are not yet implemented.
+
+The numerical suite measures all nine processing modes (plus channel isolation, bounded modulation and envelope response). The OBS suite measures actual low-pass/high-pass, notch, steep cascade, dry bypass, blend and envelope-driven cutoff. It does not qualify all possible settings or measure real-time CPU budgets.
+
 ## LADSPA filter
 
 Add **HyperDSP LADSPA** to an audio source. Search the effect catalog by name, label or maker, narrow by category, and choose an effect from the native OBS properties. Switching catalog effects clears the previous effect's port values so the new effect starts at its own defaults. Manual trusted library path and exact label (for example, `/usr/lib/ladspa/amp.so` and `amp_stereo`) remain available. The filter generates numeric and toggle controls from port metadata. Mono effects use independent instances per OBS audio channel; stereo effects require a stereo OBS layout. Only equal-input/output mono or stereo effects declaring hard-real-time capability are accepted. Unsupported configurations, missing libraries and invalid labels bypass audio.
@@ -27,7 +37,7 @@ Use `analyseplugin /path/to/plugin.so` to see available labels. Only load truste
 
 ### Mix and gain staging
 
-Each LADSPA filter also exposes input gain and output gain (−24 to +24 dB) and a linear wet/dry blend (0–1, default 1). Input gain precedes both the dry branch and the plugin, and output gain follows the blend. With a valid effect, zero wet still applies both trims; an invalid or unavailable effect instead passes the original audio unchanged. Nonfinite processed samples fall back to dry audio. The mixer is backend-independent code; only LADSPA uses it so far. Input/output gain and wet/dry changes use a 10 ms linear sample ramp. Native LADSPA port changes remain block-boundary updates. Latency compensation and parallel alignment for delayed effects remain future work.
+Each LADSPA filter also exposes input gain and output gain (−24 to +24 dB) and a linear wet/dry blend (0–1, default 1). Input gain precedes both the dry branch and the plugin, and output gain follows the blend. With a valid effect, zero wet still applies both trims; an invalid or unavailable effect instead passes the original audio unchanged. Nonfinite processed samples fall back to dry audio. The mixer is backend-independent code shared by LADSPA and the native filter. Input/output gain and wet/dry changes use a 10 ms linear sample ramp. Native LADSPA port changes remain block-boundary updates. Latency compensation and parallel alignment for delayed effects remain future work.
 
 ### Modulation
 
@@ -55,7 +65,7 @@ The production migration must remove Mic DSP from Sound's enabled effect sets, r
 
 ## Direction
 
-A standalone OBS DSP host with programmable effects (JSFX/Faust candidates) and native audio plugin hosting (LADSPA implemented; CLAP/LV2 candidates). JSFX integration needs a license compatibility review before linking YSFX (Apache-2.0) to the inherited GPL-2.0 code. Faust, CLAP and LV2 are not implemented.
+A standalone OBS DSP host with programmable effects (JSFX/Faust candidates) and native audio plugin hosting (LADSPA implemented; CLAP/LV2 candidates). JSFX integration needs a license compatibility review before linking YSFX (Apache-2.0) to the inherited GPL-2.0 code. Faust, CLAP and LV2 are not implemented. See [the development roadmap](docs/roadmap.md) for the agreed broader direction and current implementation boundary.
 
 ## Provenance
 
