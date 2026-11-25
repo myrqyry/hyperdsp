@@ -12,6 +12,10 @@ Requires a C++20 compiler, CMake, OBS development headers and libobs. Run `tests
 
 This development module retains the existing OBS source ID `mic_modeler_filter` and settings keys to preserve scene compatibility. **Do not install or load it alongside a Sound build registering the same ID.** The old module remains unchanged until a coordinated migration verifies both modules together. No changes to installed OBS plugins or scene collections are required for testing.
 
+Run `tests/verify-coexist.sh /path/to/live-latent-lab-sound-public` to build a committed Sound snapshot with only YAMNet enabled, then verify both module load orders and real stereo processing with the original filter ID. This tests coexistence, not the entire expanded neural stack.
+
+The production migration must remove Mic DSP from Sound's enabled effect sets, registration, verification receipts and installer checks together, requalify the expanded build, and install both modules while OBS is closed. Do not replace a running module or publish a second registration.
+
 ## Direction
 
 A standalone OBS DSP host with programmable effects (JSFX/Faust candidates) and native audio plugin hosting (CLAP/LV2 candidates). These are future capabilities, not currently implemented.

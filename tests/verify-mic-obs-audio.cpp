@@ -67,13 +67,27 @@ static void stream(obs_source_t* source, int rounds) {
     }
 }
 int main(int argc,char**argv) {
-    if(argc!=3)return 2;
+    if(argc!=3 && argc!=5 && argc!=6)return 2;
     if(!obs_startup("en-US",nullptr,nullptr))return 3;
     obs_audio_info ai{};
     ai.samples_per_sec=48000;ai.speakers=SPEAKERS_STEREO;
     if(!obs_reset_audio(&ai))return 4;
-    obs_module_t* module=nullptr;
-    if(obs_open_module(&module,argv[1],argv[2])!=MODULE_SUCCESS || !obs_init_module(module))return 5;
+    auto load = [](const char* binary, const char* data) {
+        obs_module_t* module=nullptr;
+        return obs_open_module(&module,binary,data)==MODULE_SUCCESS && obs_init_module(module);
+    };
+    auto owns_mic = [] {
+        const char* name = obs_source_get_display_name("mic_modeler_filter");
+        return name && std::strcmp(name,"HyperDSP Microphone DSP")==0;
+    };
+    if(argc==6 && std::strcmp(argv[5],"sound-first")!=0)return 2;
+    if(argc==6 && !load(argv[3],argv[4]))return 5;
+    if(argc==6 && obs_get_source_output_flags("mic_modeler_filter")!=0)return 7;
+    if(!load(argv[1],argv[2]))return 5;
+    if(!owns_mic())return 8;
+    if(argc==5 && !load(argv[3],argv[4]))return 5;
+    if(argc>=5 && (!obs_get_source_output_flags("yamnet_classifier_source") ||
+        !owns_mic()))return 9;
     obs_register_source(&fixture_source);
     auto* source=obs_source_create("test_mic_audio_generator","tone",nullptr,nullptr);
     auto* settings=obs_data_create();
