@@ -1,0 +1,21 @@
+# Effect Builder direction (future concept)
+
+User proposed an audio Effect Builder dock analogous to HyperShader's Shader Builder. This is a design direction, not a shipped feature or a change in immediate native-effect priorities.
+
+## Intended experience
+
+A dock for composing, previewing, saving and applying reusable deterministic audio effects, not just browsing plugins or changing one filter's parameters. A compact dark, dockable interface with an editable signal graph, searchable blocks, a parameter inspector and a visible modulation layer. Expose selected graph parameters as controls on the resulting effect; allow effect presets and portable versioned graph definitions. Consider a script editor when an appropriate DSP language and license are qualified.
+
+Reuse HyperShader's proven frontend ideas (Qt WebEngine dock, narrowly scoped native bridge, drafts/recovery, explicit export/apply and validation feedback) after inspecting their actual implementation. Do not assume shader preview execution is suitable for audio. Avoid mandatory WebEngine or frontend API dependencies in the headless DSP module.
+
+## Proposed implementation order
+
+1. Expand native DSP building blocks (dynamics, saturation, delay, modulation/time effects, reverb).
+2. Establish backend-neutral parameter metadata, effect graph schema and bounded serial/parallel routing, explicit sidechain inputs and latency accounting. Validate graphs off the audio thread; prepare resources off callback, publish a safe prepared graph, keep last working graph on errors. Feedback loops need explicitly bounded delay semantics; arbitrary cycles are rejected.
+3. Add reusable presets, graph import/export and deterministic offline/real OBS audio verification. Establish safe preview routing, levels and bypass; do not silently alter program audio.
+4. Add optional frontend dock: nodes, connections, parameter inspector, live waveform/spectrum and response visualization, modulation mapping, draft recovery, explicit preview/apply. Reuse existing native and LADSPA adapters rather than implementing DSP in the UI.
+5. Extend to additional qualified effect hosts and optional script authoring.
+
+Sight and Sound provide optional data inputs to modulation, not DSP nodes that load models. Aftermarket remains responsible for OBS interaction/routing, not effect execution. No new mandatory neural or GUI dependency.
+
+The graph is a proposal: details such as UI framework, portable format and script language remain open pending real runtime and licensing evidence.
