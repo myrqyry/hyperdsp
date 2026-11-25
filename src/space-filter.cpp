@@ -1,4 +1,5 @@
 #include "effect-library.hpp"
+#include "framework/obs/parameter_properties.hpp"
 #include <obs-module.h>
 #include "framework/dsp/space.hpp"
 #include "framework/obs/route_properties.hpp"
@@ -14,24 +15,17 @@ struct Source {
 };
 SpaceSettings read(obs_data_t* s){
     SpaceSettings f;
-    auto number=[&](const char* k){return float(obs_data_get_double(s,k));};
     auto mode=obs_data_get_int(s,"mode");f.mode=mode>=0&&mode<=2?SpaceMode(mode):SpaceMode::Bypass;
-    f.center=number("center");f.depth=number("depth");f.rate_hz=number("rate_hz");
-    f.feedback=number("feedback");f.width=number("width");
+    obs_parameters::read(s,f,space_parameters);
     f.stages=unsigned(std::clamp(obs_data_get_int(s,"stages"),2LL,12LL));
-    f.predelay=number("predelay");f.decay=number("decay");f.damping=number("damping");f.size=number("size");
-    f.wet=number("mix");f.input_db=number("input_db");f.output_db=number("output_db");
     for(unsigned i=0;i<modulation_slots;++i)f.routes[i]=obs_routes::read(s,i,10);
     return f;
 }
 void defaults(obs_data_t* s){
     SpaceSettings f;
     obs_data_set_default_int(s,"mode",1);
-    auto set=[&](const char* k,double v){obs_data_set_default_double(s,k,v);};
-    set("center",f.center);set("depth",f.depth);set("rate_hz",f.rate_hz);
-    set("feedback",f.feedback);set("width",f.width);obs_data_set_default_int(s,"stages",f.stages);
-    set("predelay",f.predelay);set("decay",f.decay);set("damping",f.damping);set("size",f.size);
-    set("mix",f.wet);set("input_db",f.input_db);set("output_db",f.output_db);
+    obs_parameters::defaults(s,f,space_parameters);
+    obs_data_set_default_int(s,"stages",f.stages);
     obs_routes::defaults(s);
 }
 void update(void* ptr,obs_data_t* s){
@@ -59,24 +53,21 @@ obs_properties_t* properties(void*){
     auto* p=obs_properties_create();
     auto* mode=obs_properties_add_list(p,"mode","Space effect",OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_INT);
     hyperdsp::add_native_modes(mode,hyperdsp::space_modes);
-    auto slider=[&](const char* k,const char* n,double lo,double hi,double step,const char* unit=nullptr){
-        auto* prop=obs_properties_add_float_slider(p,k,n,lo,hi,step);if(unit)obs_property_float_set_suffix(prop,unit);return prop;
-    };
-    slider("center","Center frequency",40,8000,1," Hz");
-    slider("depth","Sweep depth",0,4,.05," oct");
-    slider("rate_hz","Sweep rate",.05,10,.05," Hz");
-    slider("feedback","Phaser feedback",-.85,.85,.01);
+    obs_parameters::add(p,space_parameters[0]);
+    obs_parameters::add(p,space_parameters[1]);
+    obs_parameters::add(p,space_parameters[2]);
+    obs_parameters::add(p,space_parameters[3]);
     auto* stages=obs_properties_add_list(p,"stages","All-pass stages",OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_INT);
-    for(int i=2;i<=12;i+=2)obs_property_list_add_int(stages,std::to_string(i).c_str(),i);
-    slider("predelay","Pre-delay",0,200,.1," ms");
-    auto* decay=slider("decay","Nominal decay (RT60)",.1,10,.05," s");
+    for(auto i:space_stages)obs_property_list_add_int(stages,std::to_string(i).c_str(),i);
+    obs_parameters::add(p,space_parameters[4]);
+    auto* decay=obs_parameters::add(p,space_parameters[5]);
     obs_property_set_long_description(decay,"Per-line decay target before damping; measured room response varies with diffusion and damping.");
-    slider("damping","Feedback damping",0,.99,.01);
-    slider("size","Room size",.5,1.9,.01);
-    slider("width","Stereo width / phase spread",0,1,.01);
-    slider("input_db","Input gain",-24,24,.1," dB");
-    slider("mix","Wet / dry",0,1,.01);
-    slider("output_db","Output gain",-24,24,.1," dB");
+    obs_parameters::add(p,space_parameters[6]);
+    obs_parameters::add(p,space_parameters[7]);
+    obs_parameters::add(p,space_parameters[8]);
+    obs_parameters::add(p,space_parameters[9]);
+    obs_parameters::add(p,space_parameters[10]);
+    obs_parameters::add(p,space_parameters[11]);
     obs_routes::add(p,{"Center (Hz)","Sweep depth (octaves)","Sweep rate (Hz)","Phaser feedback","Wet / dry","Output amplitude","Decay (s)","Damping","Pre-delay (ms)","Room size","Stereo width"},
         "Signed amounts in destination units. Same-destination contributions sum before bounds. Only destinations applicable to the selected mode affect it.");
     obs_property_set_modified_callback(mode,visibility);return p;

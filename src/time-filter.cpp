@@ -1,4 +1,5 @@
 #include "effect-library.hpp"
+#include "framework/obs/parameter_properties.hpp"
 #include <obs-module.h>
 #include "framework/dsp/time_effect.hpp"
 #include "framework/obs/route_properties.hpp"
@@ -14,21 +15,15 @@ struct Source {
 };
 TimeSettings read(obs_data_t* s){
     TimeSettings f;
-    auto number=[&](const char* k){return float(obs_data_get_double(s,k));};
     auto mode=obs_data_get_int(s,"mode");f.mode=mode>=0&&mode<=5?TimeMode(mode):TimeMode::Bypass;
-    f.delay_ms=number("delay_ms");f.feedback=number("feedback");f.damping=number("damping");
-    f.depth_ms=number("depth_ms");f.rate_hz=number("rate_hz");f.stereo=number("stereo");
-    f.wet=number("mix");f.input_db=number("input_db");f.output_db=number("output_db");
+    obs_parameters::read(s,f,time_parameters);
     for(unsigned i=0;i<modulation_slots;++i)f.routes[i]=obs_routes::read(s,i,5);
     return f;
 }
 void defaults(obs_data_t* s){
     TimeSettings f;
     obs_data_set_default_int(s,"mode",1);
-    auto set=[&](const char* k,double v){obs_data_set_default_double(s,k,v);};
-    set("delay_ms",f.delay_ms);set("feedback",f.feedback);set("damping",f.damping);
-    set("depth_ms",f.depth_ms);set("rate_hz",f.rate_hz);set("stereo",f.stereo);
-    set("mix",f.wet);set("input_db",f.input_db);set("output_db",f.output_db);
+    obs_parameters::defaults(s,f,time_parameters);
     obs_routes::defaults(s);
 }
 void update(void* ptr,obs_data_t* s){
@@ -53,10 +48,10 @@ bool visibility(obs_properties_t* p,obs_property_t* prop,obs_data_t* s){
     show("depth_ms",moving);show("rate_hz",moving);show("stereo",moving);
     auto* delay=obs_properties_get(p,"delay_ms");
     if(delay){
-        const double maximum=mode==4?10:moving?40:2000;
+        const double maximum=moving?short_delay_max(mode):2000;
         obs_property_float_set_limits(delay,moving?.1:.001,maximum,moving?.1:.001);
         if(moving&&obs_data_get_double(s,"delay_ms")>maximum)
-            obs_data_set_double(s,"delay_ms",mode==4?2:mode==3?15:8);
+            obs_data_set_double(s,"delay_ms",short_delay_default(mode));
     }
     return obs_routes::visibility(p,prop,s);
 }
@@ -64,18 +59,15 @@ obs_properties_t* properties(void*){
     auto* p=obs_properties_create();
     auto* mode=obs_properties_add_list(p,"mode","Time effect",OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_INT);
     hyperdsp::add_native_modes(mode,hyperdsp::time_modes);
-    auto slider=[&](const char* k,const char* n,double lo,double hi,double step,const char* unit=nullptr){
-        auto* prop=obs_properties_add_float_slider(p,k,n,lo,hi,step);if(unit)obs_property_float_set_suffix(prop,unit);return prop;
-    };
-    slider("delay_ms","Delay / center",.001,2000,.001," ms");
-    slider("feedback","Feedback",-.95,.95,.01);
-    slider("damping","Feedback damping",0,.99,.01);
-    slider("depth_ms","Modulation depth",0,30,.1," ms");
-    slider("rate_hz","Modulation rate",.05,10,.05," Hz");
-    slider("stereo","Stereo phase spread",0,1,.01);
-    slider("input_db","Input gain",-24,24,.1," dB");
-    slider("mix","Wet / dry",0,1,.01);
-    slider("output_db","Output gain",-24,24,.1," dB");
+    obs_parameters::add(p,time_parameters[0]);
+    obs_parameters::add(p,time_parameters[1]);
+    obs_parameters::add(p,time_parameters[2]);
+    obs_parameters::add(p,time_parameters[3]);
+    obs_parameters::add(p,time_parameters[4]);
+    obs_parameters::add(p,time_parameters[5]);
+    obs_parameters::add(p,time_parameters[6]);
+    obs_parameters::add(p,time_parameters[7]);
+    obs_parameters::add(p,time_parameters[8]);
     obs_routes::add(p,{"Delay (ms)","Feedback","Depth (ms)","Rate (Hz)","Wet / dry","Output amplitude"},
         "Signed amount in destination units. Delay ±2000 ms, feedback ±0.95, depth ±30 ms, rate ±10 Hz, mix/output ±1. Short-delay modes clamp center and excursion.");
     obs_property_set_modified_callback(mode,visibility);return p;

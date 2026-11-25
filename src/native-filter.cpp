@@ -1,4 +1,5 @@
 #include "effect-library.hpp"
+#include "framework/obs/parameter_properties.hpp"
 #include <obs-module.h>
 #include "framework/dsp/native_filter.hpp"
 #include "interop/external_inputs.hpp"
@@ -25,11 +26,9 @@ FilterSettings read(obs_data_t* s){
     };
     auto number=[&](const char* key){return float(obs_data_get_double(s,key));};
     f.mode=FilterMode(enumeration("mode",9,0));
-    f.frequency=number("frequency");f.q=number("q");
-    f.gain_db=number("gain_db");f.comb_depth=number("comb_depth");
+    obs_parameters::read(s,f,native_parameters);
     f.alignment=FilterAlignment(enumeration("alignment",1,0));
     f.stages=unsigned(std::clamp(obs_data_get_int(s,"stages"),1LL,4LL));
-    f.wet=number("mix");f.input_db=number("input_db");f.output_db=number("output_db");
     f.source=ModSource(enumeration("mod_source",10,0));f.target=ModTarget(enumeration("mod_target",4,0));
     f.shape=WaveShape(enumeration("wave_shape",3,0));
     f.hz=number("lfo_rate");f.depth=number("mod_depth");
@@ -44,9 +43,7 @@ FilterSettings read(obs_data_t* s){
 }
 void defaults(obs_data_t* s){
     obs_data_set_default_int(s,"mode",1);obs_data_set_default_int(s,"stages",1);obs_data_set_default_int(s,"alignment",0);
-    obs_data_set_default_double(s,"frequency",1000);obs_data_set_default_double(s,"q",.70710678);
-    obs_data_set_default_double(s,"gain_db",0);obs_data_set_default_double(s,"comb_depth",1);
-    obs_data_set_default_double(s,"mix",1);obs_data_set_default_double(s,"input_db",0);obs_data_set_default_double(s,"output_db",0);
+    obs_parameters::defaults(s,FilterSettings{},native_parameters);
     obs_data_set_default_int(s,"mod_source",0);obs_data_set_default_int(s,"mod_target",0);
     obs_data_set_default_int(s,"wave_shape",0);obs_data_set_default_double(s,"lfo_rate",1);
     obs_data_set_default_double(s,"mod_depth",0);obs_data_set_default_double(s,"attack_ms",10);
@@ -128,20 +125,20 @@ obs_properties_t* properties(void*){
     };
     auto* mode=obs_properties_add_list(p,"mode","Filter type",OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_INT);
     hyperdsp::add_native_modes(mode,hyperdsp::filter_modes);
-    auto* freq=slider("frequency","Frequency",20,20000,1," Hz");
+    auto* freq=obs_parameters::add(p,native_parameters[0]);
     obs_property_set_long_description(freq,"Cutoff or center frequency; in comb mode, spacing between notches. Limited to 45% of sample rate.");
-    slider("q","Resonance (Q)",.25,12,.01);
+    obs_parameters::add(p,native_parameters[1]);
     auto* stages=obs_properties_add_list(p,"stages","Slope",OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_INT);
-    for(int i=1;i<=4;++i){auto text=std::to_string(i*12)+" dB/oct";obs_property_list_add_int(stages,text.c_str(),i);}
+    for(auto i:filter_stages){auto text=std::to_string(i*12)+" dB/oct";obs_property_list_add_int(stages,text.c_str(),i);}
     auto* alignment=list("alignment","Response",{"Resonant cascade","Butterworth (flat passband)"});
     obs_property_set_long_description(alignment,"Butterworth keeps the cutoff at -3.01 dB for every slope, with fixed per-stage Q. Resonant cascade uses the adjustable Q for each section.");
     obs_property_set_long_description(stages,"Choose slope in either alignment.");
     obs_property_set_modified_callback(alignment,visibility);
-    slider("gain_db","EQ gain",-24,24,.1," dB");
-    slider("comb_depth","Comb depth",0,1,.01);
-    slider("input_db","Input gain",-24,24,.1," dB");
-    slider("mix","Wet / dry",0,1,.01);
-    slider("output_db","Output gain",-24,24,.1," dB");
+    obs_parameters::add(p,native_parameters[2]);
+    obs_parameters::add(p,native_parameters[3]);
+    obs_parameters::add(p,native_parameters[4]);
+    obs_parameters::add(p,native_parameters[5]);
+    obs_parameters::add(p,native_parameters[6]);
     auto* source=list("mod_source","Modulation source",{"Off","LFO","Input envelope","Bass energy (<250 Hz)","Mid energy (250–2500 Hz)","Treble energy (>2500 Hz)","Sound category confidence","Sight motion energy","Sight hand X","Sight hand Y","Sight pinch closeness"});
     list("mod_target","Modulation target",{"Cutoff","Resonance (Q)","EQ gain","Wet / dry","Output amplitude"});
     list("wave_shape","Waveform",{"Sine","Triangle","Square","Saw"});

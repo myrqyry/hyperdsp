@@ -12,26 +12,53 @@ void number_parameter(obs_data_array_t* items,const char* key,const char* name,d
     obs_data_array_push_back(items,item);obs_data_release(item);
 }
 template<class S,size_t N> void parameter_list(obs_data_array_t* items,const S& settings,const hyperdsp::FloatParameter<S>(&spec)[N]){
-    for(auto& p:spec)number_parameter(items,p.key,p.name,p.min,p.max,p.step,settings.*p.member,p.unit);
+    for(auto& p:spec)number_parameter(items,p.key,p.name,p.min,p.max,p.step,p.get(settings),p.unit);
+}
+template<size_t N> void choice_parameter(obs_data_array_t* items,const char* key,const char* name,unsigned initial,const unsigned(&values)[N]){
+    auto* p=obs_data_create();obs_data_set_string(p,"key",key);obs_data_set_string(p,"name",name);
+    obs_data_set_string(p,"type","choice");obs_data_set_int(p,"default",initial);
+    auto* choices=obs_data_array_create();
+    for(auto v:values){
+        auto* c=obs_data_create();obs_data_set_int(c,"value",v);
+        obs_data_array_push_back(choices,c);obs_data_release(c);
+    }
+    obs_data_set_array(p,"choices",choices);obs_data_array_release(choices);
+    obs_data_array_push_back(items,p);obs_data_release(p);
 }
 void graph_metadata(obs_data_t* item,const hyperdsp::EffectEntry& e){
-    const bool color=e.format=="native"&&e.source=="hyperdsp_color_filter";
-    const bool spectral=e.format=="native"&&e.source=="hyperdsp_spectral_filter";
-    obs_data_set_bool(item,"graph_supported",color||spectral);
-    if(!color&&!spectral)return;
+    using namespace hyperdsp;
+    const bool supported=e.format=="native";
+    obs_data_set_bool(item,"graph_supported",supported);
+    if(!supported)return;
     auto* params=obs_data_array_create();
-    if(color){
-        parameter_list(params,hyperdsp::ColorSettings{},hyperdsp::color_parameters);
-        auto* p=obs_data_create();obs_data_set_string(p,"key","oversample");obs_data_set_string(p,"name","Oversampling");
-        obs_data_set_string(p,"type","choice");obs_data_set_int(p,"default",1);
-        auto* choices=obs_data_array_create();
-        for(auto v:hyperdsp::oversampling_choices){
-            auto* c=obs_data_create();obs_data_set_int(c,"value",v);
-            obs_data_array_push_back(choices,c);obs_data_release(c);
+    if(e.source=="hyperdsp_color_filter"){
+        parameter_list(params,ColorSettings{},color_parameters);
+        choice_parameter(params,"oversample","Oversampling",1,oversampling_choices);
+    }else if(e.source=="hyperdsp_spectral_filter"){
+        parameter_list(params,SpectralSettings{},spectral_parameters);
+    }else if(e.source=="mic_modeler_filter"){
+        parameter_list(params,MicSettings{},mic_parameters);
+    }else if(e.source=="hyperdsp_native_filter"){
+        parameter_list(params,FilterSettings{},native_parameters);
+        choice_parameter(params,"stages","Slope",1,filter_stages);
+        choice_parameter(params,"alignment","Response",0,alignment_choices);
+    }else if(e.source=="hyperdsp_dynamics_filter"){
+        parameter_list(params,DynamicsSettings{},dynamics_parameters);
+    }else if(e.source=="hyperdsp_time_filter"){
+        TimeSettings settings;
+        for(auto& p:time_parameters){
+            if(std::string_view(p.key)=="delay_ms"&&e.mode>=3)
+                number_parameter(params,p.key,p.name,.1,short_delay_max(e.mode),.1,short_delay_default(e.mode),p.unit);
+            else number_parameter(params,p.key,p.name,p.min,p.max,p.step,p.get(settings),p.unit);
         }
-        obs_data_set_array(p,"choices",choices);obs_data_array_release(choices);
-        obs_data_array_push_back(params,p);obs_data_release(p);
-    }else parameter_list(params,hyperdsp::SpectralSettings{},hyperdsp::spectral_parameters);
+    }else if(e.source=="hyperdsp_space_filter"){
+        parameter_list(params,SpaceSettings{},space_parameters);
+        choice_parameter(params,"stages","All-pass stages",6,space_stages);
+    }else if(e.source=="hyperdsp_formant_filter"){
+        parameter_list(params,FormantSettings{},formant_parameters);
+        choice_parameter(params,"from","From vowel",0,vowel_choices);
+        choice_parameter(params,"to","To vowel",2,vowel_choices);
+    }
     obs_data_set_array(item,"parameters",params);obs_data_array_release(params);
 }
 std::string default_catalog(){

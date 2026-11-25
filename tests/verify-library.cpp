@@ -30,7 +30,7 @@ int main(int argc,char** argv){
             auto* p=obs_properties_get(props,spec.key);
             equal=equal&&p&&obs_property_get_type(p)==OBS_PROPERTY_FLOAT&&
                 obs_property_float_min(p)==spec.min&&obs_property_float_max(p)==spec.max&&
-                obs_property_float_step(p)==spec.step&&obs_data_get_double(defaults,spec.key)==settings.*spec.member&&
+                obs_property_float_step(p)==spec.step&&obs_data_get_double(defaults,spec.key)==spec.get(settings)&&
                 std::string(obs_property_description(p))==spec.name;
         }
         if(props)obs_properties_destroy(props);
@@ -38,7 +38,13 @@ int main(int argc,char** argv){
         return equal;
     };
     ok=ok&&parity("hyperdsp_color_filter",hyperdsp::ColorSettings{},hyperdsp::color_parameters)&&
-        parity("hyperdsp_spectral_filter",hyperdsp::SpectralSettings{},hyperdsp::spectral_parameters);
+        parity("hyperdsp_spectral_filter",hyperdsp::SpectralSettings{},hyperdsp::spectral_parameters)&&
+        parity("mic_modeler_filter",hyperdsp::MicSettings{},hyperdsp::mic_parameters)&&
+        parity("hyperdsp_native_filter",hyperdsp::FilterSettings{},hyperdsp::native_parameters)&&
+        parity("hyperdsp_dynamics_filter",hyperdsp::DynamicsSettings{},hyperdsp::dynamics_parameters)&&
+        parity("hyperdsp_time_filter",hyperdsp::TimeSettings{},hyperdsp::time_parameters)&&
+        parity("hyperdsp_space_filter",hyperdsp::SpaceSettings{},hyperdsp::space_parameters)&&
+        parity("hyperdsp_formant_filter",hyperdsp::FormantSettings{},hyperdsp::formant_parameters);
     auto entries=hyperdsp::effect_library(hyperdsp::read_catalog(argv[3]),2);
     unsigned native=0,external=0;
     for(auto& e:entries){

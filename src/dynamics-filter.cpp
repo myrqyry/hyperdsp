@@ -1,4 +1,5 @@
 #include "effect-library.hpp"
+#include "framework/obs/parameter_properties.hpp"
 #include <obs-module.h>
 #include "framework/dsp/dynamics.hpp"
 #include "framework/obs/route_properties.hpp"
@@ -14,23 +15,15 @@ struct Source {
 };
 DynamicsSettings read(obs_data_t* s){
     DynamicsSettings f;
-    auto number=[&](const char* k){return float(obs_data_get_double(s,k));};
     auto mode=obs_data_get_int(s,"mode");f.mode=mode>=0&&mode<=4?DynamicsMode(mode):DynamicsMode::Bypass;
-    f.threshold=number("threshold");f.ratio=number("ratio");f.knee=number("knee");
-    f.attack=number("attack");f.release=number("release");f.range=number("range");
-    f.hold=number("hold");f.hysteresis=number("hysteresis");f.makeup=number("makeup");
-    f.wet=number("mix");f.input_db=number("input_db");f.output_db=number("output_db");
+    obs_parameters::read(s,f,dynamics_parameters);
     for(unsigned i=0;i<modulation_slots;++i)f.routes[i]=obs_routes::read(s,i,5);
     return f;
 }
 void defaults(obs_data_t* s){
     DynamicsSettings f;
     obs_data_set_default_int(s,"mode",1);
-    auto set=[&](const char* k,double v){obs_data_set_default_double(s,k,v);};
-    set("threshold",f.threshold);set("ratio",f.ratio);set("knee",f.knee);
-    set("attack",f.attack);set("release",f.release);set("range",f.range);
-    set("hold",f.hold);set("hysteresis",f.hysteresis);set("makeup",f.makeup);
-    set("mix",f.wet);set("input_db",f.input_db);set("output_db",f.output_db);
+    obs_parameters::defaults(s,f,dynamics_parameters);
     obs_routes::defaults(s);
 }
 void update(void* ptr,obs_data_t* s){
@@ -58,22 +51,19 @@ obs_properties_t* properties(void*){
     auto* p=obs_properties_create();
     auto* mode=obs_properties_add_list(p,"mode","Dynamics type",OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_INT);
     hyperdsp::add_native_modes(mode,hyperdsp::dynamics_modes);
-    auto slider=[&](const char* k,const char* n,double lo,double hi,double step,const char* unit=nullptr){
-        auto* prop=obs_properties_add_float_slider(p,k,n,lo,hi,step);if(unit)obs_property_float_set_suffix(prop,unit);return prop;
-    };
-    auto* threshold=slider("threshold","Threshold / ceiling",-80,0,.1," dBFS");
+    auto* threshold=obs_parameters::add(p,dynamics_parameters[0]);
     obs_property_set_long_description(threshold,"Limiter ceiling applies to the wet branch before output gain. No lookahead or true-peak guarantee.");
-    slider("ratio","Ratio",1,20,.1,":1");
-    slider("knee","Soft knee",0,24,.1," dB");
-    slider("attack","Attack",.1,200,.1," ms");
-    slider("release","Release",5,2000,1," ms");
-    slider("range","Attenuation range",0,100,.1," dB");
-    slider("hold","Gate hold",0,1000,1," ms");
-    slider("hysteresis","Gate hysteresis",0,24,.1," dB");
-    slider("makeup","Makeup gain",-24,24,.1," dB");
-    slider("input_db","Input gain",-24,24,.1," dB");
-    slider("mix","Wet / dry",0,1,.01);
-    slider("output_db","Output gain",-24,24,.1," dB");
+    obs_parameters::add(p,dynamics_parameters[1]);
+    obs_parameters::add(p,dynamics_parameters[2]);
+    obs_parameters::add(p,dynamics_parameters[3]);
+    obs_parameters::add(p,dynamics_parameters[4]);
+    obs_parameters::add(p,dynamics_parameters[5]);
+    obs_parameters::add(p,dynamics_parameters[6]);
+    obs_parameters::add(p,dynamics_parameters[7]);
+    obs_parameters::add(p,dynamics_parameters[8]);
+    obs_parameters::add(p,dynamics_parameters[9]);
+    obs_parameters::add(p,dynamics_parameters[10]);
+    obs_parameters::add(p,dynamics_parameters[11]);
     obs_routes::add(p,{"Threshold (dB)","Ratio","Makeup (dB)","Range (dB)","Wet / dry","Output amplitude"},
         "Signed amount in destination units. Threshold ±80 dB, ratio ±19, makeup ±24 dB, range ±100 dB, mix/output ±1 per route. Summed before bounds.");
     obs_property_set_modified_callback(mode,visibility);return p;

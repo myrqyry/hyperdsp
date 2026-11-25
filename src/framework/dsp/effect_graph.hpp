@@ -1,6 +1,7 @@
 #pragma once
 #include "parameter_schema.hpp"
 #include "fractional_delay.hpp"
+#include "engines/mic_dsp_engine.hpp"
 #include <memory>
 #include <variant>
 #include <functional>
@@ -12,8 +13,20 @@ struct GraphSpec {std::vector<GraphNode> nodes;int output=-1;};
 class PreparedGraph {
     static constexpr unsigned chunk=256;
     struct Edge {int source;float weight;unsigned delay;FractionalDelay line;};
+    struct MicNode {
+        std::array<stts::MicDspEngine,8> engines;
+        void reset(unsigned rate,unsigned count,int mode,MicSettings s){
+            for(unsigned c=0;c<count;++c){
+                engines[c].configure(stts::MicDspEngine::Profile(mode),rate);
+                engines[c].set_parameters(s.vibe,s.resonance);
+            }
+        }
+        void process(float*const* p,unsigned channels,unsigned frames){
+            for(unsigned c=0;c<channels;++c)engines[c].process(p[c],frames);
+        }
+    };
     struct Node {
-        std::variant<float,std::unique_ptr<Color>,std::unique_ptr<Spectral>> engine{1.f};
+        std::variant<float,std::unique_ptr<Color>,std::unique_ptr<Spectral>,std::unique_ptr<NativeFilter>,std::unique_ptr<Dynamics>,std::unique_ptr<TimeEffect>,std::unique_ptr<Space>,std::unique_ptr<Formant>,std::unique_ptr<MicNode>> engine{1.f};
         std::vector<Edge> inputs;
         std::vector<float> audio;
         unsigned latency=0;
@@ -22,11 +35,11 @@ class PreparedGraph {
     std::vector<unsigned> order_;
     unsigned channels_=0,latency_=0;
     int output_=-1;
-    static bool mode(std::string_view id,std::string_view prefix,int& value){
+    static bool mode(std::string_view id,std::string_view prefix,int& value,int maximum=5){
         if(!id.starts_with(prefix))return false;
         id.remove_prefix(prefix.size());
         auto [end,ec]=std::from_chars(id.data(),id.data()+id.size(),value);
-        return id.size()==1&&ec==std::errc{}&&end==id.data()+id.size()&&value>=1&&value<=5;
+        return id.size()==1&&ec==std::errc{}&&end==id.data()+id.size()&&value>=1&&value<=maximum;
     }
 public:
     unsigned latency()const{return latency_;}
@@ -41,7 +54,7 @@ public:
         unsigned edges=0;
         for(int i=0;i<count;++i){
             auto& n=s.nodes[i];
-            if(n.inputs.empty()||n.inputs.size()>8||n.params.size()>16)return fail("Invalid node input or parameter count");
+            if(n.inputs.empty()||n.inputs.size()>8||n.params.size()>24)return fail("Invalid node input or parameter count");
             edges+=n.inputs.size();if(edges>32)return fail("At most 32 edges");
             for(auto& e:n.inputs)if(e.source<-1||e.source>=count||!std::isfinite(e.weight)||std::abs(e.weight)>4)return fail("Invalid edge");
         }
@@ -78,6 +91,44 @@ public:
                 SpectralSettings settings;settings.mode=SpectralMode(m);
                 for(auto& [k,v]:spec.params)if(!assign_parameter(settings,spectral_parameters,k,v))return fail("Invalid Spectral parameter: "+k);
                 auto engine=std::make_unique<Spectral>();engine->reset(rate,channels,settings);own_latency=engine->latency_samples();n.engine=std::move(engine);
+            }else if(mode(spec.effect,"native:mic_modeler_filter:",m,6)){
+                MicSettings settings;
+                for(auto& [k,v]:spec.params)if(!assign_parameter(settings,mic_parameters,k,v))return fail("Invalid Microphone parameter: "+k);
+                auto engine=std::make_unique<MicNode>();engine->reset(rate,channels,m,settings);n.engine=std::move(engine);
+            }else if(mode(spec.effect,"native:hyperdsp_native_filter:",m,9)){
+                FilterSettings settings;settings.mode=FilterMode(m);
+                for(auto& [k,v]:spec.params){
+                    if(k=="stages"){if(!valid_choice(v,filter_stages))return fail("Invalid filter stages");settings.stages=unsigned(v);}
+                    else if(k=="alignment"){if(!valid_choice(v,alignment_choices))return fail("Invalid filter alignment");settings.alignment=FilterAlignment(int(v));}
+                    else if(!assign_parameter(settings,native_parameters,k,v))return fail("Invalid Filter parameter: "+k);
+                }
+                auto engine=std::make_unique<NativeFilter>();engine->reset(rate,settings);n.engine=std::move(engine);
+            }else if(mode(spec.effect,"native:hyperdsp_dynamics_filter:",m,4)){
+                DynamicsSettings settings;settings.mode=DynamicsMode(m);
+                for(auto& [k,v]:spec.params)if(!assign_parameter(settings,dynamics_parameters,k,v))return fail("Invalid Dynamics parameter: "+k);
+                auto engine=std::make_unique<Dynamics>();engine->reset(rate,settings);n.engine=std::move(engine);
+            }else if(mode(spec.effect,"native:hyperdsp_time_filter:",m)){
+                TimeSettings settings;settings.mode=TimeMode(m);
+                if(m>=3)settings.delay_ms=short_delay_default(m);
+                for(auto& [k,v]:spec.params){
+                    if(k=="delay_ms"&&m>=3&&(v<.1||v>short_delay_max(m)))return fail("Invalid short-delay center");
+                    if(!assign_parameter(settings,time_parameters,k,v))return fail("Invalid Time parameter: "+k);
+                }
+                auto engine=std::make_unique<TimeEffect>();engine->reset(rate,channels,settings);n.engine=std::move(engine);
+            }else if(mode(spec.effect,"native:hyperdsp_space_filter:",m,2)){
+                SpaceSettings settings;settings.mode=SpaceMode(m);
+                for(auto& [k,v]:spec.params){
+                    if(k=="stages"){if(!valid_choice(v,space_stages))return fail("Invalid phaser stages");settings.stages=unsigned(v);}
+                    else if(!assign_parameter(settings,space_parameters,k,v))return fail("Invalid Space parameter: "+k);
+                }
+                auto engine=std::make_unique<Space>();engine->reset(rate,channels,settings);n.engine=std::move(engine);
+            }else if(mode(spec.effect,"native:hyperdsp_formant_filter:",m,2)){
+                FormantSettings settings;settings.mode=FormantMode(m);
+                for(auto& [k,v]:spec.params){
+                    if(k=="from"||k=="to"){if(!valid_choice(v,vowel_choices))return fail("Invalid vowel");(k=="from"?settings.from:settings.to)=unsigned(v);}
+                    else if(!assign_parameter(settings,formant_parameters,k,v))return fail("Invalid Formant parameter: "+k);
+                }
+                auto engine=std::make_unique<Formant>();engine->reset(rate,settings);n.engine=std::move(engine);
             }else return fail("Unsupported graph effect: "+spec.effect);
             n.latency=input_latency+own_latency;
             n.audio.resize(size_t(channels)*chunk);

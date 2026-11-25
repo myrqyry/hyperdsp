@@ -41,7 +41,7 @@ bool parse(const std::string& raw,GraphSpec& spec,std::string& error){
         auto* effect=json_object_get(n,"effect");auto* inputs=json_object_get(n,"inputs");
         auto* params=json_object_get(n,"params");
         if(!keys(n,{"effect","inputs","params"})||!json_is_string(effect)||json_string_length(effect)>128||
-            !json_is_array(inputs)||json_array_size(inputs)>8||(params&&(!json_is_object(params)||json_object_size(params)>16))){
+            !json_is_array(inputs)||json_array_size(inputs)>8||(params&&(!json_is_object(params)||json_object_size(params)>24))){
             error="Invalid node "+std::to_string(index);return false;
         }
         GraphNode node;node.effect=json_string_value(effect);
@@ -95,7 +95,7 @@ const char* name(void*){return "HyperDSP Graph";}
 obs_properties_t* properties(void* p){
     auto* props=obs_properties_create();
     auto* json=obs_properties_add_text(props,"graph_json","Effect graph (schema 1)",OBS_TEXT_MULTILINE);
-    std::string status="Native Color, Spectral and gain nodes. Invalid edits retain the previous active graph in this session.";
+    std::string status="All native effects and gain nodes. Invalid edits retain the previous active graph in this session.";
     if(p){
         auto* f=static_cast<Source*>(p);std::lock_guard lock(f->mutex);
         if(!f->error.empty())status+=" Last error: "+f->error;

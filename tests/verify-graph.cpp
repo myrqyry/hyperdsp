@@ -56,6 +56,42 @@ int main(){
     invalid=s;invalid.nodes.resize(17);ok=ok&&!g.replace(invalid,48000,2,error);
     invalid=s;invalid.nodes[1].effect="ladspa:unqualified";ok=ok&&!g.replace(invalid,48000,2,error);
     s.nodes[1].params["oversample"]=3;ok=ok&&!g.replace(s,48000,2,error);
+    // Each remaining native mode must compile and actually process audio.
+    const std::pair<const char*,int> families[]={{"mic_modeler_filter",6},{"hyperdsp_native_filter",9},
+        {"hyperdsp_dynamics_filter",4},{"hyperdsp_time_filter",5},{"hyperdsp_space_filter",2},{"hyperdsp_formant_filter",2}};
+    for(auto [family,count]:families)for(int mode=1;mode<=count;++mode){
+        GraphSpec native{{{std::string("native:")+family+":"+std::to_string(mode),{},{{-1,1}}}},0};
+        GraphRuntime a,b;
+        if(!a.replace(native,48000,2,error)||!b.replace(native,48000,2,error)){
+            std::printf("GRAPH_NATIVE rejected %s: %s\n",native.nodes[0].effect.c_str(),error.c_str());ok=false;continue;
+        }
+        double energy=0,delta=0,right_energy=0,partition=0;bool finite=true;
+        for(unsigned k=0;k<64;++k){
+            std::array<float,777> x{},y{};
+            for(unsigned j=0;j<x.size();++j)x[j]=.3f*std::sin(.071*(k*x.size()+j));
+            auto dry=x;float* ptr[]={x.data(),y.data()};a.process(ptr,2,x.size());
+            for(unsigned j=0;j<x.size();++j){
+                float l=dry[j],r=0;float* single[]={&l,&r};b.process(single,2,1);
+                finite=finite&&std::isfinite(x[j])&&std::isfinite(y[j]);partition=std::max(partition,double(std::max(std::abs(l-x[j]),std::abs(r-y[j]))));right_energy+=y[j]*y[j];
+                energy+=x[j]*x[j];delta+=std::abs(x[j]-dry[j]);
+            }
+        }
+        bool cross=(std::string_view(family)=="hyperdsp_time_filter"&&mode==2)||(std::string_view(family)=="hyperdsp_space_filter"&&mode==2);
+        bool identity=std::string_view(family)=="hyperdsp_native_filter"&&mode>=5&&mode<=7;
+        bool pass=finite&&partition<2e-6&&energy>1e-8&&(identity||delta>1e-3)&&(cross||right_energy<1e-10);
+        std::printf("GRAPH_NATIVE %s:%d energy=%g delta=%g partition=%g right=%g pass=%d\n",family,mode,energy,delta,partition,right_energy,pass);
+        ok=ok&&pass;
+    }
+    GraphSpec wrong{{{"native:hyperdsp_space_filter:1",{{"stages",3}},{{-1,1}}}},0};
+    ok=ok&&!g.replace(wrong,48000,2,error);
+    wrong.nodes[0]={"native:hyperdsp_time_filter:4",{{"delay_ms",20}},{{-1,1}}};
+    ok=ok&&!g.replace(wrong,48000,2,error);
+    wrong.nodes[0]={"native:hyperdsp_formant_filter:2",{{"f3",17000}},{{-1,1}}};
+    ok=ok&&!g.replace(wrong,48000,2,error);
+    wrong.nodes[0]={"native:hyperdsp_formant_filter:2",{{"from",5}},{{-1,1}}};
+    ok=ok&&!g.replace(wrong,48000,2,error);
+    wrong.nodes[0]={"native:hyperdsp_native_filter:1",{{"alignment",2}},{{-1,1}}};
+    ok=ok&&!g.replace(wrong,48000,2,error);
     std::printf("GRAPH_CORE cancellation=%g latency=%u pass=%d\n",max_error,g.latency(),ok);
     return ok?0:1;
 }

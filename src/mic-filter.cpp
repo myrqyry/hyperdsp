@@ -1,4 +1,5 @@
 #include "effect-library.hpp"
+#include "framework/obs/parameter_properties.hpp"
 /**
  * @file mic-filter.cpp
  * @brief OBS filter for verified, in-place microphone-style DSP coloration.
@@ -26,8 +27,7 @@ const char* get_name(void*) { return "HyperDSP Microphone DSP"; }
 
 void defaults(obs_data_t* settings) {
     obs_data_set_default_int(settings, "mic_type", 0);
-    obs_data_set_default_double(settings, "vibe", .5);
-    obs_data_set_default_double(settings, "resonance", .707);
+    hyperdsp::obs_parameters::defaults(settings,hyperdsp::MicSettings{},hyperdsp::mic_parameters);
 }
 
 void update(void* ptr, obs_data_t* settings) {
@@ -39,8 +39,7 @@ void update(void* ptr, obs_data_t* settings) {
         // Those scenes become dry, never silently mapped to a DSP preset.
         selected = 0;
     }
-    const float vibe = float(obs_data_get_double(settings, "vibe"));
-    const float resonance = float(obs_data_get_double(settings, "resonance"));
+    hyperdsp::MicSettings parameters;hyperdsp::obs_parameters::read(settings,parameters,hyperdsp::mic_parameters);
     std::lock_guard<std::mutex> lock(data->configuration_mutex);
     if (data->profile.load(std::memory_order_relaxed) != selected) {
         data->profile.store(0, std::memory_order_release);
@@ -49,7 +48,7 @@ void update(void* ptr, obs_data_t* settings) {
                               data->sample_rate);
     }
     for (auto& channel : data->channels)
-        channel.set_parameters(vibe, resonance);
+        channel.set_parameters(parameters.vibe, parameters.resonance);
     data->profile.store(selected, std::memory_order_release);
 }
 
@@ -75,8 +74,7 @@ obs_properties_t* properties(void*) {
     obs_property_set_long_description(profile,
         "Procedural tone profiles, not measurements or reproductions of named microphones. "
         "These profiles use conventional DSP only.");
-    obs_properties_add_float_slider(props, "vibe", "Spectral sweep", 0.0, 1.0, 0.01);
-    obs_properties_add_float_slider(props, "resonance", "Sweep resonance", 0.1, 5.0, 0.1);
+    for(auto& p:hyperdsp::mic_parameters)hyperdsp::obs_parameters::add(props,p);
     return props;
 }
 

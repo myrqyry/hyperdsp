@@ -10,12 +10,20 @@ result=run()
 assert result["schema"]==1 and len(result["effects"])==40
 assert sum(e["format"]=="native" for e in result["effects"])==38
 assert len({e["id"] for e in result["effects"]})==40
-assert sum(e["graph_supported"] for e in result["effects"])==10
+assert sum(e["graph_supported"] for e in result["effects"])==38
 color=next(e for e in result["effects"] if e["id"]=="native:hyperdsp_color_filter:3")
 params={p["key"]:p for p in color["parameters"]}
 assert params["drive"]["min"]==-24 and params["drive"]["max"]==36 and params["drive"]["default"]==0
 assert [c["value"] for c in params["oversample"]["choices"]]==[1,2,4]
 assert result["graph_utilities"][0]["id"]=="gain"
+for effect in result["effects"]:
+    if effect["graph_supported"]:
+        assert effect["parameters"] and len({p["key"] for p in effect["parameters"]})==len(effect["parameters"])
+flanger=next(e for e in result["effects"] if e["id"]=="native:hyperdsp_time_filter:4")
+delay=next(p for p in flanger["parameters"] if p["key"]=="delay_ms")
+assert delay["min"]==.1 and delay["max"]==10 and delay["default"]==2
+formant=next(e for e in result["effects"] if e["id"]=="native:hyperdsp_formant_filter:2")
+assert len(formant["parameters"])==17 and next(p for p in formant["parameters"] if p["key"]=="f3")["default"]==2900
 items=run("--search","amplifier stereo","--channels","1")["effects"]
 assert len(items)==1 and items[0]["label"]=="amp_stereo" and not items[0]["compatible"]
 items=run("--search","vowel morph","--format","native")["effects"]

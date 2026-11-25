@@ -1,4 +1,5 @@
 #include "effect-library.hpp"
+#include "framework/obs/parameter_properties.hpp"
 #include <obs-module.h>
 #include "framework/dsp/formant.hpp"
 #include "framework/obs/route_properties.hpp"
@@ -14,32 +15,18 @@ struct Source {
 };
 FormantSettings read(obs_data_t* s){
     FormantSettings f;
-    auto number=[&](const char* k){return float(obs_data_get_double(s,k));};
     auto mode=obs_data_get_int(s,"mode");f.mode=mode>=0&&mode<=2?FormantMode(mode):FormantMode::Bypass;
+    obs_parameters::read(s,f,formant_parameters);
     f.from=unsigned(std::clamp(obs_data_get_int(s,"from"),0LL,4LL));
     f.to=unsigned(std::clamp(obs_data_get_int(s,"to"),0LL,4LL));
-    f.morph=number("morph");f.shift=number("shift");f.width=number("width");
-    for(unsigned j=0;j<3;++j){
-        const auto suffix=std::to_string(j+1);
-        f.frequency[j]=number(("f"+suffix).c_str());
-        f.bandwidth[j]=number(("b"+suffix).c_str());
-        f.gain[j]=number(("g"+suffix).c_str());
-    }
-    f.wet=number("mix");f.input_db=number("input_db");f.output_db=number("output_db");
     for(unsigned i=0;i<modulation_slots;++i)f.routes[i]=obs_routes::read(s,i,10);
     return f;
 }
 void defaults(obs_data_t* s){
     FormantSettings f;
     obs_data_set_default_int(s,"mode",1);
-    auto set=[&](const char* k,double v){obs_data_set_default_double(s,k,v);};
+    obs_parameters::defaults(s,f,formant_parameters);
     obs_data_set_default_int(s,"from",f.from);obs_data_set_default_int(s,"to",f.to);
-    set("morph",f.morph);set("shift",f.shift);set("width",f.width);
-    for(unsigned j=0;j<3;++j){
-        const auto suffix=std::to_string(j+1);
-        set(("f"+suffix).c_str(),f.frequency[j]);set(("b"+suffix).c_str(),f.bandwidth[j]);set(("g"+suffix).c_str(),f.gain[j]);
-    }
-    set("mix",f.wet);set("input_db",f.input_db);set("output_db",f.output_db);
     obs_routes::defaults(s);
 }
 void update(void* ptr,obs_data_t* s){
@@ -67,27 +54,19 @@ obs_properties_t* properties(void*){
     auto* p=obs_properties_create();
     auto* mode=obs_properties_add_list(p,"mode","Formant effect",OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_INT);
     hyperdsp::add_native_modes(mode,hyperdsp::formant_modes);
-    auto slider=[&](const char* k,const char* n,double lo,double hi,double step,const char* unit=nullptr){
-        auto* prop=obs_properties_add_float_slider(p,k,n,lo,hi,step);if(unit)obs_property_float_set_suffix(prop,unit);return prop;
-    };
     const char* vowels[]={"A (ah)","E (eh)","I (ee)","O (oh)","U (oo)"};
     for(auto key:{"from","to"}){
         auto* p_vowel=obs_properties_add_list(p,key,key==std::string("from")?"From vowel":"To vowel",OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_INT);
-        for(int j=0;j<5;++j)obs_property_list_add_int(p_vowel,vowels[j],j);
+        for(auto j:vowel_choices)obs_property_list_add_int(p_vowel,vowels[j],j);
     }
-    slider("morph","Vowel morph",0,1,.01);
-    auto* shift=slider("shift","Resonance shift",-24,24,.1," semitones");
+    obs_parameters::add(p,formant_parameters[0]);
+    auto* shift=obs_parameters::add(p,formant_parameters[1]);
     obs_property_set_long_description(shift,"Scales the resonator center frequencies and bandwidths; does not transpose the input pitch.");
-    slider("width","Bandwidth scale",.25,4,.01," ×");
-    for(unsigned j=0;j<3;++j){
-        auto suffix=std::to_string(j+1),prefix="Formant "+suffix+" · ";
-        slider(("f"+suffix).c_str(),(prefix+"Frequency").c_str(),40,16000,1," Hz");
-        slider(("b"+suffix).c_str(),(prefix+"Bandwidth").c_str(),20,4000,1," Hz");
-        slider(("g"+suffix).c_str(),(prefix+"Gain").c_str(),-36,6,.1," dB");
-    }
-    slider("input_db","Input gain",-24,24,.1," dB");
-    slider("mix","Wet / dry",0,1,.01);
-    slider("output_db","Output gain",-24,24,.1," dB");
+    obs_parameters::add(p,formant_parameters[2]);
+    for(unsigned j=6;j<std::size(formant_parameters);++j)obs_parameters::add(p,formant_parameters[j]);
+    obs_parameters::add(p,formant_parameters[3]);
+    obs_parameters::add(p,formant_parameters[4]);
+    obs_parameters::add(p,formant_parameters[5]);
     obs_routes::add(p,{"Vowel morph","Resonance shift (semitones)","Bandwidth scale","Wet / dry","Output amplitude","F1 offset (Hz)","F2 offset (Hz)","F3 offset (Hz)","F1 gain (dB)","F2 gain (dB)","F3 gain (dB)"},
         "Signed amount in destination units. Morph is bounded to 0–1, and resonance offsets/gains also apply to vowel presets. Frequency and Q remain bounded at the actual sample rate.");
     obs_property_set_modified_callback(mode,visibility);return p;

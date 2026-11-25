@@ -96,13 +96,19 @@ int main(int argc,char**argv){
         return std::array<double,2>{std::sqrt(stats.sum_l.load()/std::max<uint64_t>(1,stats.samples.load())),std::sqrt(stats.sum_r.load()/std::max<uint64_t>(1,stats.samples.load()))};
     };
     auto a=measure();
+    const char* mixed=R"({"schema":1,"nodes":[{"effect":"native:hyperdsp_native_filter:1","params":{"frequency":1500,"alignment":1,"stages":2},"inputs":[{"source":-1,"weight":1}]},{"effect":"native:hyperdsp_dynamics_filter:4","params":{"threshold":-20},"inputs":[{"source":0,"weight":1}]},{"effect":"native:hyperdsp_time_filter:1","params":{"delay_ms":2,"feedback":0,"mix":1},"inputs":[{"source":1,"weight":1}]}],"output":2})";
+    obs_data_set_string(settings,"graph_json",mixed);obs_source_update(filter,settings);auto chain=measure();
+    // Linked limiter caps the wet branch at .1 and preserves the stereo ratio.
+    bool mixed_ok=chain[0]>.055&&chain[0]<=.1001&&std::abs(chain[1]/chain[0]-.4)<.003;
+    std::printf("GRAPH_MIXED left=%g right=%g pass=%d\n",chain[0],chain[1],mixed_ok);
+
     obs_data_set_string(settings,"graph_json",parallel);obs_source_update(filter,settings);auto b=measure();
     obs_data_set_string(settings,"graph_json",invalid);obs_source_update(filter,settings);auto c=measure();
     obs_data_set_string(settings,"graph_json",R"({"schema":1,"nodes":[{"effect":"gain","params":{"gain_db":99},"inputs":[{"source":-1,"weight":1}]}],"output":0})");obs_source_update(filter,settings);auto d=measure();
     obs_data_set_string(settings,"graph_json",R"({"schema":1,"schema":1,"nodes":[],"output":-1})");obs_source_update(filter,settings);auto duplicate=measure();
     obs_data_set_string(settings,"graph_json",R"({"schema":1,"nodes":[42],"output":0})");obs_source_update(filter,settings);auto malformed=measure();
     obs_data_set_string(settings,"graph_json",R"({"schema":1,"nodes":[],"output":-1})");obs_source_update(filter,settings);auto bypass=measure();
-    bool ok=controls&&std::abs(a[0]-.071046)<.002&&std::abs(a[1]/a[0]-.4)<.001&&b[0]<1e-5&&c[0]<1e-5&&d[0]<1e-5&&duplicate[0]<1e-5&&malformed[0]<1e-5&&std::abs(bypass[0]-.282843)<.002;
+    bool ok=mixed_ok&&controls&&std::abs(a[0]-.071046)<.002&&std::abs(a[1]/a[0]-.4)<.001&&b[0]<1e-5&&c[0]<1e-5&&d[0]<1e-5&&duplicate[0]<1e-5&&malformed[0]<1e-5&&std::abs(bypass[0]-.282843)<.002;
     std::printf("GRAPH_OBS serial=%g parallel=%g invalid=%g invalid_param=%g bypass=%g pass=%d\n",a[0],b[0],c[0],d[0],bypass[0],ok);
     obs_set_output_source(1,nullptr);obs_source_dec_active(source);obs_source_filter_remove(source,filter);
     obs_source_release(filter);obs_source_release(source);obs_data_release(settings);obs_shutdown();return ok?0:1;
