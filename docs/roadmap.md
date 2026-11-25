@@ -6,15 +6,17 @@ Standalone conventional audio effects and hosting for OBS, with optional inputs 
 
 - Mic DSP extraction (coordinated production migration still pending).
 - Native low/high/band-pass, notch, peak, shelves, comb, all-pass; 12–48 dB/oct resonant and normalized Butterworth cascades for low/high-pass.
-- Native filter LFO, peak-envelope and bass/mid/treble energy cutoff/Q/gain/mix/output bindings (one source/destination).
+- Native filter LFO, peak-envelope and bass/mid/treble energy cutoff/Q/gain/mix/output bindings (four independent routes).
 - LADSPA hosting, searchable categorized catalog and parameter controls.
 - Shared wet/dry, input/output gain and smoothing for mixer controls.
 - LADSPA sine LFO for mix/output; four independent reactive routes (four LFO shapes, envelope, bass/mid/treble) to mix/output or continuous plugin input ports; existing OBS serial filter stack.
 
+- Shared fixed-capacity modulation matrix across native filters and LADSPA.
+
 ## Next layers
 
 - Favorites, reusable presets, reset/import/export, better effect descriptions and a compact native frequency-response view.
-- Reusable modulation sources and destination registry across hosts, configurable detector bands, multi-route bindings for native filters, shared routing matrix across backends and native port smoothing.
+- Extend the shared modulation matrix with a destination registry, configurable detector bands, additional backends, external signals and native port smoothing.
 - Optional Sight and Sound signal consumers using their current versioned OBS procedures and stable UUIDs, with missing/stale-data fallback. No inference in HyperDSP and no producer calls on the audio callback.
 - Dedicated serial/parallel effect chain editor, latency compensation and alignment; sidechains and appropriate oversampling for nonlinear effects.
 - Additional creative filters/effects: formant resonances, morphing responses, spectral gate; auto-wah can already be configured with the native envelope-controlled filter.

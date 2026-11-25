@@ -132,6 +132,28 @@ int main(int argc,char**argv){
     obs_data_set_double(settings,"band_sensitivity",6.);
     obs_source_update(filter,settings);
     auto bass_active=measure(100);
+    obs_data_set_int(settings,"mod2_source",3);
+    obs_data_set_int(settings,"mod2_target",4);
+    obs_data_set_double(settings,"mod2_depth",-.5);
+    obs_data_set_double(settings,"mod2_sensitivity",6.);
+    obs_source_update(filter,settings);
+    auto combined=measure(100,60);
+    obs_data_set_int(settings,"mod3_source",3);
+    obs_data_set_int(settings,"mod3_target",4);
+    obs_data_set_double(settings,"mod3_depth",.5);
+    obs_data_set_double(settings,"mod3_sensitivity",6.);
+    obs_source_update(filter,settings);
+    auto canceled=measure(100,60);
+    obs_data_set_int(settings,"mod2_source",0);
+    obs_data_set_int(settings,"mod3_source",0);
+    obs_source_update(filter,settings);
+    auto restored=measure(100,60);
+    auto* matrix_props=obs_source_properties(filter);
+    bool matrix_ok=matrix_props&&obs_properties_get(matrix_props,"mod2_target")&&obs_properties_get(matrix_props,"mod4_target");
+    if(matrix_props)obs_properties_destroy(matrix_props);
+    matrix_ok=matrix_ok&&combined[0]<bass_active[0]*.9&&combined[0]>.30&&
+        std::abs(canceled[0]-restored[0])<.002&&std::abs(restored[1]/restored[0]-.4)<.001;
+    std::printf("NATIVE_MATRIX base=%g combined=%g canceled=%g restored=%g pass=%d\n",bass_active[0],combined[0],canceled[0],restored[0],matrix_ok);
     auto bass_reject=measure(8000,60);
     obs_data_set_int(settings,"mod_source",5);
     obs_source_update(filter,settings);
@@ -141,7 +163,7 @@ int main(int argc,char**argv){
     obs_data_set_double(settings,"mix",1.);
     obs_data_set_int(settings,"mode",0);obs_source_update(filter,settings);
     auto dry=measure(8000);
-    bool ok=controls&&bass_active[0]>.40&&bass_reject[0]<.32&&treble_active[0]>.40&&treble_reject[0]<.32&&std::abs(resonant_cutoff[0]-.4/std::sqrt(2.)*.25)<.002&&std::abs(butter_cutoff[0]-.2)<.002&&opened[0]>2*closed[0]&&std::abs(opened[1]/opened[0]-.4)<.001&&std::abs(mix_dry[0]-.4/std::sqrt(2.))<.001&&low[0]>.27&&high[0]<.006&&steep[0]<.0001&&hp[0]>.27&&notch[0]<.0001&&
+    bool ok=matrix_ok&&controls&&bass_active[0]>.40&&bass_reject[0]<.32&&treble_active[0]>.40&&treble_reject[0]<.32&&std::abs(resonant_cutoff[0]-.4/std::sqrt(2.)*.25)<.002&&std::abs(butter_cutoff[0]-.2)<.002&&opened[0]>2*closed[0]&&std::abs(opened[1]/opened[0]-.4)<.001&&std::abs(mix_dry[0]-.4/std::sqrt(2.))<.001&&low[0]>.27&&high[0]<.006&&steep[0]<.0001&&hp[0]>.27&&notch[0]<.0001&&
         std::abs(dry[0]-.4/std::sqrt(2.))<.001&&std::abs(dry[1]-.16/std::sqrt(2.))<.001&&
         std::abs(low[1]/low[0]-.4)<.001&&std::abs(hp[1]/hp[0]-.4)<.001;
     std::printf("NATIVE_ENVELOPE_OBS closed=%g opened=%g mix_dry=%g\n",closed[0],opened[0],mix_dry[0]);

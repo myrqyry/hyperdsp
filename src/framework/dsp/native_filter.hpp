@@ -1,6 +1,6 @@
 #pragma once
 #include "modulation.hpp"
-#include "band_energy.hpp"
+#include "modulation_matrix.hpp"
 #include <array>
 #include <cstddef>
 #include <numbers>
@@ -21,6 +21,7 @@ struct FilterSettings {
     ModTarget target=ModTarget::Cutoff;
     WaveShape shape=WaveShape::Sine;
     float hz=1,depth=0,attack_ms=10,release_ms=100,band_sensitivity=0;
+    std::array<RouteConfig,modulation_slots-1> extra_routes{};
 };
 
 // Topology-preserving state-variable filter. Coefficients are shared across
@@ -79,16 +80,16 @@ class NativeFilter {
     };
     std::array<Channel,channels_> voices_{};
     FilterSettings settings_{};
-    LinearRamp frequency_,q_,gain_,depth_,comb_;
+    LinearRamp frequency_,q_,gain_,comb_;
     MixModulator mixer_;
-    BandEnergy band_energy_;
+    ModulationMatrix matrix_;
+    bool any_route_=false;
     unsigned rate_=48000,ramp_=480;
-    double phase_=0;
     std::array<SvfCoefficients,stages_> cached_{};
     std::array<double,stages_> stage_q_{};
     FilterMode cached_mode_=FilterMode::Bypass;
     float cached_hz_=0,cached_q_=0,cached_gain_=0;
-    float envelope_=0,attack_=0,release_=0,current_hz_=1000;
+    float current_hz_=1000;
     static float bound(double v,double lo,double hi,double fallback){return MixSettings::bounded(v,lo,hi,fallback);}
     float max_hz()const{return std::min(20000.f,.45f*rate_);}
     FilterSettings sanitize(FilterSettings s)const{
@@ -106,20 +107,23 @@ class NativeFilter {
         }
         if(s.alignment!=FilterAlignment::Butterworth)s.alignment=FilterAlignment::Resonant;
         s.hz=bound(s.hz,.05,20,1);
-        s.depth=bound(s.depth,0,1,0);
+        s.depth=bound(s.depth,-1,1,0);
         s.attack_ms=bound(s.attack_ms,1,200,10);
         s.release_ms=bound(s.release_ms,10,2000,100);
         s.band_sensitivity=bound(s.band_sensitivity,-24,24,0);
         return s;
     }
-    void set_envelope_coefficients(){
-        attack_=float(std::exp(-1000./(rate_*double(settings_.attack_ms))));
-        release_=float(std::exp(-1000./(rate_*double(settings_.release_ms))));
-    }
-    bool band_source()const{return settings_.source>=ModSource::Bass&&settings_.source<=ModSource::Treble;}
-    void configure_band(){
-        if(band_source())band_energy_.configure(rate_,Band(unsigned(settings_.source)-unsigned(ModSource::Bass)),
-            settings_.attack_ms,settings_.release_ms,settings_.band_sensitivity);
+    void configure_routes(bool reset){
+        RouteConfig first{int(settings_.source),int(settings_.target),int(settings_.shape),
+            settings_.hz,settings_.depth,settings_.attack_ms,settings_.release_ms,settings_.band_sensitivity};
+        any_route_=false;
+        for(unsigned slot=0;slot<modulation_slots;++slot){
+            auto c=slot==0?first:settings_.extra_routes[slot-1];
+            if(c.destination<0||c.destination>int(ModTarget::Output))c.source=0;
+            c.amount=bound(c.amount,-1,1,0);
+            matrix_.configure(slot,rate_,c,reset);
+            any_route_=any_route_||matrix_.active(slot);
+        }
     }
     void prepare_alignment(){
         for(unsigned k=0;k<settings_.stages;++k)
@@ -129,68 +133,42 @@ class NativeFilter {
     void clear_state(){
         for(auto& v:voices_){v.state={};v.delay.fill(0);v.pos=0;}
     }
-    float source(float peak){
-        const float coef=peak>envelope_?attack_:release_;
-        envelope_=coef*envelope_+(1-coef)*peak;
-        if(envelope_<1e-20f)envelope_=0;
-        if(settings_.source==ModSource::Envelope)return std::clamp(envelope_,0.f,1.f);
-        if(settings_.source!=ModSource::Lfo)return 0;
-        float w=0;
-        switch(settings_.shape){
-        case WaveShape::Sine:w=float(std::sin(2*std::numbers::pi*phase_));break;
-        case WaveShape::Triangle:w=float(1.-4.*std::abs(phase_-.5));break;
-        case WaveShape::Square:w=phase_<.5?1.f:-1.f;break;
-        case WaveShape::Saw:w=float(2.*phase_-1.);break;
-        }
-        phase_+=double(settings_.hz)/rate_;
-        phase_-=std::floor(phase_);
-        return w;
-    }
 public:
     void reset(unsigned rate,FilterSettings s){
         rate_=std::clamp(rate,8000u,192000u);ramp_=std::max(1u,rate_/100);
-        settings_=sanitize(s);clear_state();phase_=0;envelope_=0;prepare_alignment();cached_hz_=0;
+        settings_=sanitize(s);clear_state();prepare_alignment();cached_hz_=0;
         frequency_.reset(std::log2(settings_.frequency));q_.reset(std::log2(settings_.q));
-        gain_.reset(settings_.gain_db);depth_.reset(settings_.depth);
+        gain_.reset(settings_.gain_db);
         comb_.reset(settings_.comb_depth);
         mixer_.reset(rate_,MixSettings::from(settings_.wet,settings_.input_db,settings_.output_db));
-        set_envelope_coefficients();band_energy_.reset();configure_band();current_hz_=settings_.frequency;
+        configure_routes(true);current_hz_=settings_.frequency;
     }
     void set(FilterSettings s){
         s=sanitize(s);
         const bool topology_changed=s.mode!=settings_.mode||s.stages!=settings_.stages||s.alignment!=settings_.alignment;
         if(topology_changed)clear_state();
-        if(s.source!=settings_.source)band_energy_.reset();
         settings_=s;
-        configure_band();
+        configure_routes(false);
         if(topology_changed)prepare_alignment();
         frequency_.set(std::log2(s.frequency),ramp_);q_.set(std::log2(s.q),ramp_);
-        gain_.set(s.gain_db,ramp_);comb_.set(s.comb_depth,ramp_);depth_.set(s.depth,ramp_);
+        gain_.set(s.gain_db,ramp_);comb_.set(s.comb_depth,ramp_);
         mixer_.set(MixSettings::from(s.wet,s.input_db,s.output_db),{});
-        set_envelope_coefficients();
     }
     float current_frequency()const{return current_hz_;}
     void process(float* const* buffers,unsigned channels,unsigned frames){
         if(!buffers||channels>channels_)return;
         for(unsigned i=0;i<frames;++i){
-            float peak=0;
-            for(unsigned c=0;c<channels;++c)if(buffers[c]&&std::isfinite(buffers[c][i]))
-                peak=std::max(peak,std::abs(buffers[c][i]));
-            float signal=source(peak);
-            if(band_source()){
-                std::array<float,channels_> samples{};
-                for(unsigned c=0;c<channels;++c)if(buffers[c])samples[c]=buffers[c][i];
-                signal=band_energy_.next(samples.data(),channels);
-            }
-            const float mod=signal*depth_.next();
             float freq=frequency_.next(),q=q_.next(),gain=gain_.next();
             auto mix=mixer_.next();
-            switch(settings_.target){
-            case ModTarget::Cutoff:freq+=4*mod;break;
-            case ModTarget::Resonance:q+=2*mod;break;
-            case ModTarget::Gain:gain+=12*mod;break;
-            case ModTarget::Mix:mix.wet=std::clamp(mix.wet+mod,0.f,1.f);break;
-            case ModTarget::Output:mix.output_gain*=1+mod;break;
+            if(any_route_){
+                std::array<float,channels_> samples{};
+                for(unsigned c=0;c<channels;++c)if(buffers[c])samples[c]=buffers[c][i];
+                const auto frame=matrix_.next(samples.data(),channels);
+                freq+=4*frame.sum(int(ModTarget::Cutoff));
+                q+=2*frame.sum(int(ModTarget::Resonance));
+                gain+=12*frame.sum(int(ModTarget::Gain));
+                mix.wet=std::clamp(mix.wet+frame.sum(int(ModTarget::Mix)),0.f,1.f);
+                mix.output_gain*=std::max(0.f,1+frame.sum(int(ModTarget::Output)));
             }
             current_hz_=std::clamp(std::exp2(freq),20.f,max_hz());
             const float resonance=settings_.alignment==FilterAlignment::Butterworth?0.f:std::clamp(std::exp2(q),.25f,12.f);

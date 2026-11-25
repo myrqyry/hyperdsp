@@ -1,7 +1,7 @@
 #include <obs-module.h>
 #include "ladspa-catalog.hpp"
 #include "framework/dsp/modulation.hpp"
-#include "framework/dsp/reactive_source.hpp"
+#include "framework/dsp/modulation_matrix.hpp"
 #include <ladspa.h>
 #include <dlfcn.h>
 #include <algorithm>
@@ -15,7 +15,7 @@
 namespace {
 constexpr unsigned max_ports=256;
 constexpr unsigned block_size=1024;
-constexpr unsigned route_count=4;
+constexpr unsigned route_count=hyperdsp::modulation_slots;
 std::string route_key(unsigned slot,const char* field){
     return (slot==0?std::string("react_"):"react"+std::to_string(slot+1)+"_")+field;
 }
@@ -73,14 +73,13 @@ struct Instance {
     std::array<hyperdsp::MixSettings,block_size> mix_frames{};
     bool initialized=false;
     struct Route {
-        hyperdsp::ReactiveSource signal;
-        hyperdsp::LinearRamp amount;
         int source=0,port=-1;
         bool mix=false,output=false;
         float min=0,max=0;
         std::string saved_target;
     };
     std::array<Route,route_count> routes;
+    hyperdsp::ModulationMatrix matrix;
     bool any_route=false,any_port=false;
     std::array<float,max_ports> base_values{};
     std::array<float,MAX_AUDIO_CHANNELS> detector_input{};
@@ -108,8 +107,6 @@ struct Instance {
             auto number=[&](const char* key){return obs_data_get_double(settings,route_key(slot,key).c_str());};
             const auto source=integer("source"),shape=integer("shape");
             const std::string target=obs_data_get_string(settings,route_key(slot,"target").c_str());
-            const bool changed=r.saved_target!=target;
-            const int previous_source=r.source;
             r.saved_target=target;
             r.source=source>=0&&source<=5?int(source):0;
             r.port=-1;r.mix=target=="mix";r.output=target=="output";
@@ -118,12 +115,11 @@ struct Instance {
                     r.port=int(c.port);r.min=c.min;r.max=c.max;
                 }
             if(r.port<0&&!r.mix&&!r.output)r.source=0;
-            r.signal.configure(rate,r.source,shape>=0&&shape<=3?int(shape):0,
-                number("rate"),number("attack"),number("release"),number("sensitivity"));
             const double limit=r.port>=0?10000.:1.;
-            const float amount=r.source?hyperdsp::MixSettings::bounded(number("amount"),-limit,limit,0):0;
-            if(first||changed||previous_source!=r.source)r.amount.reset(first?amount:0.f);
-            r.amount.set(amount,std::max(1u,rate/100));
+            const float amount=hyperdsp::MixSettings::bounded(number("amount"),-limit,limit,0);
+            const int destination=r.port>=0?r.port+2:r.mix?0:r.output?1:-1;
+            matrix.configure(slot,rate,{r.source,destination,shape>=0&&shape<=3?int(shape):0,
+                number("rate"),amount,number("attack"),number("release"),number("sensitivity")},first);
             any_route=any_route||r.source!=0;
             any_port=any_port||(r.source!=0&&r.port>=0);
         }
@@ -196,17 +192,11 @@ struct Instance {
                 auto mix=modulation.next();
                 if(any_route){
                     for(unsigned c=0;c<channels;++c)detector_input[c]=reinterpret_cast<float*>(audio->data[c])[off+j];
-                    float wet_delta=0,output_delta=0;
-                    for(unsigned slot=0;slot<route_count;++slot){
-                        auto& r=routes[slot];
-                        if(!r.source)continue;
-                        const float mod=r.signal.next(detector_input.data(),channels)*r.amount.next();
-                        if(r.mix)wet_delta+=mod;
-                        if(r.output)output_delta+=mod;
-                        if(r.port>=0)port_sums[slot]+=mod;
-                    }
-                    mix.wet=std::clamp(mix.wet+wet_delta,0.f,1.f);
-                    mix.output_gain*=std::max(0.f,1.f+output_delta);
+                    const auto frame=matrix.next(detector_input.data(),channels);
+                    for(unsigned slot=0;slot<route_count;++slot)
+                        if(frame.entries[slot].destination>=2)port_sums[slot]+=frame.entries[slot].value;
+                    mix.wet=std::clamp(mix.wet+frame.sum(0),0.f,1.f);
+                    mix.output_gain*=std::max(0.f,1.f+frame.sum(1));
                 }
                 mix_frames[j]=mix;
             }

@@ -12,6 +12,9 @@ struct NativeSource {
     NativeFilter filter;
     unsigned rate=0;
 };
+std::string extra_key(unsigned slot,const char* field){
+    return "mod"+std::to_string(slot+1)+"_"+field;
+}
 FilterSettings read(obs_data_t* s){
     FilterSettings f;
     auto enumeration=[&](const char* key,int max,int fallback){
@@ -28,6 +31,12 @@ FilterSettings read(obs_data_t* s){
     f.shape=WaveShape(enumeration("wave_shape",3,0));
     f.hz=number("lfo_rate");f.depth=number("mod_depth");
     f.attack_ms=number("attack_ms");f.release_ms=number("release_ms");f.band_sensitivity=number("band_sensitivity");
+    for(unsigned slot=1;slot<modulation_slots;++slot){
+        auto key=[&](const char* field){return extra_key(slot,field);};
+        f.extra_routes[slot-1]={enumeration(key("source").c_str(),5,0),enumeration(key("target").c_str(),4,0),
+            enumeration(key("shape").c_str(),3,0),number(key("rate").c_str()),number(key("depth").c_str()),
+            number(key("attack").c_str()),number(key("release").c_str()),number(key("sensitivity").c_str())};
+    }
     return f;
 }
 void defaults(obs_data_t* s){
@@ -39,6 +48,15 @@ void defaults(obs_data_t* s){
     obs_data_set_default_int(s,"wave_shape",0);obs_data_set_default_double(s,"lfo_rate",1);
     obs_data_set_default_double(s,"mod_depth",0);obs_data_set_default_double(s,"attack_ms",10);
     obs_data_set_default_double(s,"release_ms",100);obs_data_set_default_double(s,"band_sensitivity",0);
+    for(unsigned slot=1;slot<modulation_slots;++slot){
+        auto key=[&](const char* field){return extra_key(slot,field);};
+        for(auto field:{"source","target","shape"})obs_data_set_default_int(s,key(field).c_str(),0);
+        obs_data_set_default_double(s,key("rate").c_str(),1);
+        obs_data_set_default_double(s,key("depth").c_str(),0);
+        obs_data_set_default_double(s,key("attack").c_str(),10);
+        obs_data_set_default_double(s,key("release").c_str(),100);
+        obs_data_set_default_double(s,key("sensitivity").c_str(),0);
+    }
 }
 void update(void* ptr,obs_data_t* s){
     auto* f=static_cast<NativeSource*>(ptr);if(!f)return;
@@ -67,6 +85,14 @@ bool visibility(obs_properties_t* p,obs_property_t*,obs_data_t* s){
     show("mod_target",source!=0);show("mod_depth",source!=0);
     show("wave_shape",source==1);show("lfo_rate",source==1);
     show("attack_ms",source>=2);show("release_ms",source>=2);show("band_sensitivity",source>=3);
+    for(unsigned slot=1;slot<modulation_slots;++slot){
+        auto key=[&](const char* field){return extra_key(slot,field);};
+        const auto src=obs_data_get_int(s,key("source").c_str());
+        show(key("target").c_str(),src!=0);show(key("depth").c_str(),src!=0);
+        show(key("shape").c_str(),src==1);show(key("rate").c_str(),src==1);
+        show(key("attack").c_str(),src>=2);show(key("release").c_str(),src>=2);
+        show(key("sensitivity").c_str(),src>=3);
+    }
     return true;
 }
 obs_properties_t* properties(void*){
@@ -100,11 +126,24 @@ obs_properties_t* properties(void*){
     list("mod_target","Modulation target",{"Cutoff","Resonance (Q)","EQ gain","Wet / dry","Output amplitude"});
     list("wave_shape","Waveform",{"Sine","Triangle","Square","Saw"});
     slider("lfo_rate","LFO rate",.05,20,.05," Hz");
-    auto* depth=slider("mod_depth","Modulation depth",0,1,.01);
+    auto* depth=slider("mod_depth","Modulation depth",-1,1,.01);
     obs_property_set_long_description(depth,"At full depth: cutoff ±4 octaves, Q ±2 octaves (not in Butterworth), EQ gain ±12 dB, wet/dry ±1, or output amplitude ×(1 + modulation). Envelope is positive-only.");
     slider("attack_ms","Envelope attack",1,200,1," ms");
     slider("release_ms","Envelope release",10,2000,10," ms");
     slider("band_sensitivity","Band sensitivity",-24,24,.1," dB");
+    for(unsigned slot=1;slot<modulation_slots;++slot){
+        auto key=[&](const char* field){return extra_key(slot,field);};
+        const auto prefix="Route "+std::to_string(slot+1)+" · ";
+        auto* src=list(key("source").c_str(),(prefix+"Source").c_str(),{"Off","LFO","Input envelope","Bass energy","Mid energy","Treble energy"});
+        list(key("target").c_str(),(prefix+"Destination").c_str(),{"Cutoff","Resonance (Q)","EQ gain","Wet / dry","Output amplitude"});
+        list(key("shape").c_str(),(prefix+"Waveform").c_str(),{"Sine","Triangle","Square","Saw"});
+        slider(key("rate").c_str(),(prefix+"Rate").c_str(),.05,20,.05," Hz");
+        slider(key("depth").c_str(),(prefix+"Depth").c_str(),-1,1,.01);
+        slider(key("attack").c_str(),(prefix+"Attack").c_str(),1,200,1," ms");
+        slider(key("release").c_str(),(prefix+"Release").c_str(),10,2000,10," ms");
+        slider(key("sensitivity").c_str(),(prefix+"Sensitivity").c_str(),-24,24,.1," dB");
+        obs_property_set_modified_callback(src,visibility);
+    }
     obs_property_set_modified_callback(mode,visibility);
     obs_property_set_modified_callback(source,visibility);
     return p;
