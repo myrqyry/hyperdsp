@@ -1,5 +1,6 @@
 #include <obs-module.h>
 #include "framework/dsp/native_filter.hpp"
+#include "interop/sound_inputs.hpp"
 #include <array>
 #include <memory>
 #include <mutex>
@@ -10,6 +11,7 @@ using namespace hyperdsp;
 struct NativeSource {
     std::mutex mutex;
     NativeFilter filter;
+    SoundInputs sound;
     unsigned rate=0;
 };
 std::string extra_key(unsigned slot,const char* field){
@@ -27,13 +29,13 @@ FilterSettings read(obs_data_t* s){
     f.alignment=FilterAlignment(enumeration("alignment",1,0));
     f.stages=unsigned(std::clamp(obs_data_get_int(s,"stages"),1LL,4LL));
     f.wet=number("mix");f.input_db=number("input_db");f.output_db=number("output_db");
-    f.source=ModSource(enumeration("mod_source",5,0));f.target=ModTarget(enumeration("mod_target",4,0));
+    f.source=ModSource(enumeration("mod_source",6,0));f.target=ModTarget(enumeration("mod_target",4,0));
     f.shape=WaveShape(enumeration("wave_shape",3,0));
     f.hz=number("lfo_rate");f.depth=number("mod_depth");
     f.attack_ms=number("attack_ms");f.release_ms=number("release_ms");f.band_sensitivity=number("band_sensitivity");
     for(unsigned slot=1;slot<modulation_slots;++slot){
         auto key=[&](const char* field){return extra_key(slot,field);};
-        f.extra_routes[slot-1]={enumeration(key("source").c_str(),5,0),enumeration(key("target").c_str(),4,0),
+        f.extra_routes[slot-1]={enumeration(key("source").c_str(),6,0),enumeration(key("target").c_str(),4,0),
             enumeration(key("shape").c_str(),3,0),number(key("rate").c_str()),number(key("depth").c_str()),
             number(key("attack").c_str()),number(key("release").c_str()),number(key("sensitivity").c_str())};
     }
@@ -63,6 +65,12 @@ void update(void* ptr,obs_data_t* s){
     auto settings=read(s);
     obs_audio_info ai{};if(!obs_get_audio_info(&ai))return;
     std::lock_guard lock(f->mutex);
+    for(unsigned slot=0;slot<modulation_slots;++slot){
+        auto channel=slot?extra_key(slot,"sound_channel"):"sound_channel";
+        auto category=slot?extra_key(slot,"sound_category"):"sound_category";
+        f->sound.configure(slot,slot?settings.extra_routes[slot-1].source:int(settings.source),
+            obs_data_get_string(s,channel.c_str()),obs_data_get_string(s,category.c_str()));
+    }
     if(f->rate!=ai.samples_per_sec){f->rate=ai.samples_per_sec;f->filter.reset(f->rate,settings);}
     else f->filter.set(settings);
 }
@@ -84,7 +92,9 @@ bool visibility(obs_properties_t* p,obs_property_t*,obs_data_t* s){
     show("frequency",mode!=0);
     show("mod_target",source!=0);show("mod_depth",source!=0);
     show("wave_shape",source==1);show("lfo_rate",source==1);
-    show("attack_ms",source>=2);show("release_ms",source>=2);show("band_sensitivity",source>=3);
+    show("attack_ms",source>=2&&source<=5);show("release_ms",source>=2&&source<=5);show("band_sensitivity",source>=3&&source<=5);
+    show("sound_channel",source==6);show("sound_category",source==6);
+    if(source==6)sound_channel_choices(obs_properties_get(p,"sound_channel"),obs_data_get_string(s,"sound_channel"));
     for(unsigned slot=1;slot<modulation_slots;++slot){
         auto key=[&](const char* field){return extra_key(slot,field);};
         const auto src=obs_data_get_int(s,key("source").c_str());
@@ -122,7 +132,7 @@ obs_properties_t* properties(void*){
     slider("input_db","Input gain",-24,24,.1," dB");
     slider("mix","Wet / dry",0,1,.01);
     slider("output_db","Output gain",-24,24,.1," dB");
-    auto* source=list("mod_source","Modulation source",{"Off","LFO","Input envelope","Bass energy (<250 Hz)","Mid energy (250–2500 Hz)","Treble energy (>2500 Hz)"});
+    auto* source=list("mod_source","Modulation source",{"Off","LFO","Input envelope","Bass energy (<250 Hz)","Mid energy (250–2500 Hz)","Treble energy (>2500 Hz)","Sound category confidence"});
     list("mod_target","Modulation target",{"Cutoff","Resonance (Q)","EQ gain","Wet / dry","Output amplitude"});
     list("wave_shape","Waveform",{"Sine","Triangle","Square","Saw"});
     slider("lfo_rate","LFO rate",.05,20,.05," Hz");
@@ -131,10 +141,13 @@ obs_properties_t* properties(void*){
     slider("attack_ms","Envelope attack",1,200,1," ms");
     slider("release_ms","Envelope release",10,2000,10," ms");
     slider("band_sensitivity","Band sensitivity",-24,24,.1," dB");
+    auto* channel=obs_properties_add_list(p,"sound_channel","Sound classifier",OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_STRING);
+    obs_property_list_add_string(channel,"Choose Sound classifier","");
+    obs_properties_add_text(p,"sound_category","Sound category (exact label)",OBS_TEXT_DEFAULT);
     for(unsigned slot=1;slot<modulation_slots;++slot){
         auto key=[&](const char* field){return extra_key(slot,field);};
         const auto prefix="Route "+std::to_string(slot+1)+" · ";
-        auto* src=list(key("source").c_str(),(prefix+"Source").c_str(),{"Off","LFO","Input envelope","Bass energy","Mid energy","Treble energy"});
+        auto* src=list(key("source").c_str(),(prefix+"Source").c_str(),{"Off","LFO","Input envelope","Bass energy","Mid energy","Treble energy","Sound category confidence"});
         list(key("target").c_str(),(prefix+"Destination").c_str(),{"Cutoff","Resonance (Q)","EQ gain","Wet / dry","Output amplitude"});
         list(key("shape").c_str(),(prefix+"Waveform").c_str(),{"Sine","Triangle","Square","Saw"});
         slider(key("rate").c_str(),(prefix+"Rate").c_str(),.05,20,.05," Hz");
@@ -142,6 +155,9 @@ obs_properties_t* properties(void*){
         slider(key("attack").c_str(),(prefix+"Attack").c_str(),1,200,1," ms");
         slider(key("release").c_str(),(prefix+"Release").c_str(),10,2000,10," ms");
         slider(key("sensitivity").c_str(),(prefix+"Sensitivity").c_str(),-24,24,.1," dB");
+        auto* ch=obs_properties_add_list(p,key("sound_channel").c_str(),(prefix+"Sound classifier").c_str(),OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_STRING);
+        obs_property_list_add_string(ch,"Choose Sound classifier","");
+        obs_properties_add_text(p,key("sound_category").c_str(),(prefix+"Sound category (exact label)").c_str(),OBS_TEXT_DEFAULT);
         obs_property_set_modified_callback(src,visibility);
     }
     obs_property_set_modified_callback(mode,visibility);
@@ -159,6 +175,7 @@ obs_audio_data* process(void* ptr,obs_audio_data* audio){
     if(ch>MAX_AUDIO_CHANNELS)return audio;
     std::array<float*,MAX_AUDIO_CHANNELS> buffers{};
     for(unsigned i=0;i<ch;++i)buffers[i]=reinterpret_cast<float*>(audio->data[i]);
+    f->filter.external_values(f->sound.snapshot());
     f->filter.process(buffers.data(),ch,audio->frames);
     return audio;
 }

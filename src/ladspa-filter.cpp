@@ -2,6 +2,7 @@
 #include "ladspa-catalog.hpp"
 #include "framework/dsp/modulation.hpp"
 #include "framework/dsp/modulation_matrix.hpp"
+#include "interop/sound_inputs.hpp"
 #include <ladspa.h>
 #include <dlfcn.h>
 #include <algorithm>
@@ -80,6 +81,7 @@ struct Instance {
     };
     std::array<Route,route_count> routes;
     hyperdsp::ModulationMatrix matrix;
+    hyperdsp::SoundInputs sound;
     bool any_route=false,any_port=false;
     std::array<float,max_ports> base_values{};
     std::array<float,MAX_AUDIO_CHANNELS> detector_input{};
@@ -91,7 +93,7 @@ struct Instance {
         }
         if(library)dlclose(library);
     }
-    void parameters(obs_data_t* settings) {
+    void parameters(obs_data_t* settings,bool subscribe=true) {
         auto mix=hyperdsp::MixSettings::from(obs_data_get_double(settings,"mix"),
             obs_data_get_double(settings,"input_db"),obs_data_get_double(settings,"output_db"));
         const auto target=obs_data_get_int(settings,"lfo_target");
@@ -108,7 +110,7 @@ struct Instance {
             const auto source=integer("source"),shape=integer("shape");
             const std::string target=obs_data_get_string(settings,route_key(slot,"target").c_str());
             r.saved_target=target;
-            r.source=source>=0&&source<=5?int(source):0;
+            r.source=source>=0&&source<=6?int(source):0;
             r.port=-1;r.mix=target=="mix";r.output=target=="output";
             for(const auto& c:controls)
                 if(!c.integer&&!c.toggle&&c.max>c.min&&target==target_id(path,label,c.port)){
@@ -120,6 +122,8 @@ struct Instance {
             const int destination=r.port>=0?r.port+2:r.mix?0:r.output?1:-1;
             matrix.configure(slot,rate,{r.source,destination,shape>=0&&shape<=3?int(shape):0,
                 number("rate"),amount,number("attack"),number("release"),number("sensitivity")},first);
+            if(subscribe)sound.configure(slot,r.source,obs_data_get_string(settings,route_key(slot,"sound_channel").c_str()),
+                obs_data_get_string(settings,route_key(slot,"sound_category").c_str()));
             any_route=any_route||r.source!=0;
             any_port=any_port||(r.source!=0&&r.port>=0);
         }
@@ -135,7 +139,7 @@ struct Instance {
             for(auto& v:voices)v->values[c.port]=value;
         }
     }
-    bool open(obs_data_t* settings,unsigned sr,unsigned ch) {
+    bool open(obs_data_t* settings,unsigned sr,unsigned ch,bool subscribe=true) {
         path=obs_data_get_string(settings,"library");
         label=obs_data_get_string(settings,"label");
         rate=sr;channels=ch;
@@ -177,12 +181,13 @@ struct Instance {
             }
             voices.push_back(std::move(v));
         }
-        parameters(settings);
+        parameters(settings,subscribe);
         for(auto& v:voices){if(d->activate)d->activate(v->handle);v->activated=true;}
         return true;
     }
     void process(obs_audio_data* audio) {
         for(unsigned c=0;c<channels;++c)if(!audio->data[c])return;
+        matrix.external_values(sound.snapshot());
         for(unsigned off=0;off<audio->frames;){
             unsigned n=std::min(any_port?64u:block_size,audio->frames-off);
             std::array<float,route_count> port_sums{};
@@ -296,7 +301,7 @@ bool modified(obs_properties_t* props,obs_property_t*,obs_data_t* settings){
     for(unsigned p=0;p<max_ports;++p)obs_properties_remove_by_name(props,key(p).c_str());
     unsigned rate=0,ch=0;Instance inspect;
     fill_targets(props,nullptr,settings);
-    if(format(rate,ch)&&inspect.open(settings,rate,ch)){
+    if(format(rate,ch)&&inspect.open(settings,rate,ch,false)){
         fill_targets(props,&inspect,settings);
         for(auto& c:inspect.controls){
             auto k=key(c.port);
@@ -351,7 +356,9 @@ bool reactive_visibility(obs_properties_t* props,obs_property_t*,obs_data_t* set
         auto show=[&](const char* field,bool yes){if(auto* p=obs_properties_get(props,route_key(slot,field).c_str()))obs_property_set_visible(p,yes);};
         show("target",source!=0);show("amount",source!=0);
         show("shape",source==1);show("rate",source==1);
-        show("attack",source>=2);show("release",source>=2);show("sensitivity",source>=3);
+        show("attack",source>=2&&source<=5);show("release",source>=2&&source<=5);show("sensitivity",source>=3&&source<=5);
+        show("sound_channel",source==6);show("sound_category",source==6);
+        if(source==6)hyperdsp::sound_channel_choices(obs_properties_get(props,route_key(slot,"sound_channel").c_str()),obs_data_get_string(settings,route_key(slot,"sound_channel").c_str()));
     }
     return true;
 }
@@ -382,13 +389,13 @@ obs_properties_t* properties(void* p){
     auto* output=obs_properties_add_float_slider(props,"output_db","Output gain",-24.,24.,.1);
     obs_property_float_set_suffix(input," dB");
     obs_property_float_set_suffix(output," dB");
-    const char* sources[]={"Off","LFO","Input envelope","Bass energy","Mid energy","Treble energy"};
+    const char* sources[]={"Off","LFO","Input envelope","Bass energy","Mid energy","Treble energy","Sound category confidence"};
     const char* shapes[]={"Sine","Triangle","Square","Saw"};
     for(unsigned slot=0;slot<route_count;++slot){
         const std::string title="Route "+std::to_string(slot+1)+" · ";
         auto field=[&](const char* name){return route_key(slot,name);};
         auto* reactive=obs_properties_add_list(props,field("source").c_str(),(title+"Source").c_str(),OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_INT);
-        for(int i=0;i<6;++i)obs_property_list_add_int(reactive,sources[i],i);
+        for(int i=0;i<7;++i)obs_property_list_add_int(reactive,sources[i],i);
         obs_properties_add_list(props,field("target").c_str(),(title+"Destination").c_str(),OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_STRING);
         auto* amount=obs_properties_add_float(props,field("amount").c_str(),(title+"Amount").c_str(),-10000,10000,.01);
         obs_property_set_long_description(amount,"Signed parameter units. Mix/output amount is bounded to ±1. Contributions to the same destination are summed before clamping.");
@@ -398,6 +405,9 @@ obs_properties_t* properties(void* p){
         obs_properties_add_float_slider(props,field("attack").c_str(),(title+"Attack (ms)").c_str(),1,200,1);
         obs_properties_add_float_slider(props,field("release").c_str(),(title+"Release (ms)").c_str(),10,2000,10);
         obs_properties_add_float_slider(props,field("sensitivity").c_str(),(title+"Sensitivity (dB)").c_str(),-24,24,.1);
+        auto* ch=obs_properties_add_list(props,field("sound_channel").c_str(),(title+"Sound classifier").c_str(),OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_STRING);
+        obs_property_list_add_string(ch,"Choose Sound classifier","");
+        obs_properties_add_text(props,field("sound_category").c_str(),(title+"Sound category (exact label)").c_str(),OBS_TEXT_DEFAULT);
         obs_property_set_modified_callback(reactive,reactive_visibility);
     }
     fill_targets(props,nullptr);

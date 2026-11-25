@@ -12,6 +12,7 @@
 #include <thread>
 #include <array>
 #include <string>
+#include "sound-signal-fixture.hpp"
 
 struct Stats {
     std::atomic<uint64_t> samples{0};
@@ -265,6 +266,46 @@ int main(int argc,char**argv) {
        output[0]>.11&&std::abs(disabled[0]-stale[0])<.002;
     std::printf("LADSPA_REACT bass=%g reject=%g stale=%g output=%g disabled=%g pass=%d\n",
        bass[0],reject[0],stale[0],output[0],disabled[0],react_ok);
+    obs_register_source(&sound_fixture::info);
+    auto* producer=obs_source_create_private("yamnet_classifier_source","classifier",nullptr);
+    obs_source_filter_add(source,producer);
+    const auto channel=std::string(obs_source_get_uuid(source))+"/"+obs_source_get_uuid(producer);
+    const auto stereo_port=std::string("port:")+argv[3]+"\tamp_stereo\t0";
+    obs_data_set_int(settings,"react2_source",6);
+    obs_data_set_string(settings,"react2_target",stereo_port.c_str());
+    obs_data_set_double(settings,"react2_amount",.5);
+    obs_data_set_string(settings,"react2_sound_channel",channel.c_str());
+    obs_data_set_string(settings,"react2_sound_category","Speech");
+    obs_source_update(filter,settings);
+    auto external=measure(100,60);
+    auto* sound_props=obs_source_properties(filter);
+    auto* sound_source=sound_props?obs_properties_get(sound_props,"react2_source"):nullptr;
+    auto* sound_choice=sound_props?obs_properties_get(sound_props,"react2_sound_channel"):nullptr;
+    if(sound_source)obs_property_modified(sound_source,settings);
+    bool picker_ok=false;
+    if(sound_choice)for(size_t i=0;i<obs_property_list_item_count(sound_choice);++i){
+        const auto* v=obs_property_list_item_string(sound_choice,i);
+        if(v&&channel==v)picker_ok=true;
+    }
+    if(sound_props)obs_properties_destroy(sound_props);
+    sound_fixture::delay_ms=900;
+    auto stalled=measure(100,140);
+    sound_fixture::delay_ms=0;
+    obs_data_set_string(settings,"react2_sound_category","No such category");
+    obs_source_update(filter,settings);
+    auto wrong=measure(100,60);
+    obs_data_set_string(settings,"react2_sound_category","Speech");
+    obs_source_update(filter,settings);
+    auto recovered=measure(100,140);
+    obs_data_set_int(settings,"react2_source",0);
+    obs_source_update(filter,settings);
+    obs_source_filter_remove(source,producer);
+    obs_source_release(producer);
+    bool sound_ok=picker_ok&&sound_fixture::calls>0&&std::abs(external[0]-.141421)<.004&&
+        std::abs(stalled[0]-.070711)<.004&&std::abs(wrong[0]-.070711)<.004&&
+        std::abs(recovered[0]-.141421)<.004&&std::abs(external[1]/external[0]-.4)<.001;
+    std::printf("SOUND_LADSPA_OBS active=%g stalled=%g wrong=%g recovered=%g picker=%d pass=%d\n",
+        external[0],stalled[0],wrong[0],recovered[0],picker_ok,sound_ok);
     obs_data_set_double(settings,"output_db",12.);
     obs_data_set_string(settings,"label","unknown_label");
     obs_source_update(filter,settings);
@@ -273,7 +314,7 @@ int main(int argc,char**argv) {
     obs_source_update(filter,settings);
     auto dry=measure();
     auto near=[](double a,double b){return std::abs(a-b)<.005;};
-    bool pass=matrix_ok && react_ok && prop_ok && browser_ok && lfo_ok && near(quiet[0],.4/std::sqrt(2.)*.25) && near(quiet[1],.16/std::sqrt(2.)*.25)
+    bool pass=sound_ok && matrix_ok && react_ok && prop_ok && browser_ok && lfo_ok && near(quiet[0],.4/std::sqrt(2.)*.25) && near(quiet[1],.16/std::sqrt(2.)*.25)
         && near(louder[0],quiet[0]*2) && near(louder[1],quiet[1]*2)
         && near(blend[0],.4/std::sqrt(2.)*.75) && near(blend[1],.16/std::sqrt(2.)*.75)
         && near(bypass[0],.4/std::sqrt(2.)) && near(bypass[1],.16/std::sqrt(2.))

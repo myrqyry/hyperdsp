@@ -21,19 +21,22 @@ struct ModulationFrame {
 class ModulationMatrix {
     struct Slot {
         ReactiveSource signal;
-        LinearRamp amount;
+        LinearRamp amount,external;
         int source=0,destination=-1;
+        unsigned ramp=480;
     };
     std::array<Slot,modulation_slots> slots_{};
 public:
     void configure(unsigned i,unsigned rate,RouteConfig c,bool reset=false){
         if(i>=slots_.size())return;
         auto& s=slots_[i];
-        if(c.source<1||c.source>5||c.destination<0)c.source=0;
+        if(c.source<1||c.source>6||c.destination<0)c.source=0;
         if(reset)s=Slot{};
         const bool changed=s.source!=c.source||s.destination!=c.destination;
         s.source=c.source;s.destination=c.destination;
-        s.signal.configure(rate,c.source,c.shape,c.hz,c.attack,c.release,c.sensitivity);
+        s.signal.configure(rate,c.source==6?0:c.source,c.shape,c.hz,c.attack,c.release,c.sensitivity);
+        s.ramp=std::max(1u,rate/100);
+        if(reset||changed)s.external.reset(0);
         const float amount=c.source?MixSettings::bounded(c.amount,-10000,10000,0):0;
         if(reset)s.amount.reset(amount);
         else {
@@ -43,11 +46,15 @@ public:
     }
     bool active(unsigned i)const{return i<slots_.size()&&slots_[i].source!=0;}
     int destination(unsigned i)const{return active(i)?slots_[i].destination:-1;}
+    void external_values(const std::array<float,modulation_slots>& values){
+        for(unsigned i=0;i<slots_.size();++i)if(slots_[i].source==6)
+            slots_[i].external.set(MixSettings::bounded(values[i],0,1,0),slots_[i].ramp);
+    }
     ModulationFrame next(const float* samples,unsigned channels){
         ModulationFrame frame;
         for(unsigned i=0;i<slots_.size();++i){
             auto& s=slots_[i];
-            if(s.source)frame.entries[i]={s.destination,s.signal.next(samples,channels)*s.amount.next()};
+            if(s.source)frame.entries[i]={s.destination,(s.source==6?s.external.next():s.signal.next(samples,channels))*s.amount.next()};
         }
         return frame;
     }

@@ -13,11 +13,13 @@ Standalone conventional audio effects and hosting for OBS, with optional inputs 
 
 - Shared fixed-capacity modulation matrix across native filters and LADSPA.
 
+- Optional Sound classification confidence inputs on both effect backends, via the shared matrix and versioned producer procedure.
+
 ## Next layers
 
 - Favorites, reusable presets, reset/import/export, better effect descriptions and a compact native frequency-response view.
 - Extend the shared modulation matrix with a destination registry, configurable detector bands, additional backends, external signals and native port smoothing.
-- Optional Sight and Sound signal consumers using their current versioned OBS procedures and stable UUIDs, with missing/stale-data fallback. No inference in HyperDSP and no producer calls on the audio callback.
+- Extend optional interop to Sight and additional Sound signals, category picker and full live-producer qualification; retain versioned procedures, stable UUIDs and missing/stale-data fallback. No inference in HyperDSP and no producer calls on the audio callback.
 - Dedicated serial/parallel effect chain editor, latency compensation and alignment; sidechains and appropriate oversampling for nonlinear effects.
 - Additional creative filters/effects: formant resonances, morphing responses, spectral gate; auto-wah can already be configured with the native envelope-controlled filter.
 - Other hosting formats: JSFX (license compatibility review of YSFX), Faust, CLAP, LV2. No unsupported format claims.
