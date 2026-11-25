@@ -1,3 +1,4 @@
+#include "effect-library.hpp"
 /**
  * @file mic-filter.cpp
  * @brief OBS filter for verified, in-place microphone-style DSP coloration.
@@ -70,13 +71,7 @@ obs_properties_t* properties(void*) {
     obs_properties_t* props = obs_properties_create();
     obs_property_t* profile = obs_properties_add_list(
         props, "mic_type", "Microphone-style tone", OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
-    obs_property_list_add_int(profile, "None (bypass)", 0);
-    obs_property_list_add_int(profile, "Dynamic: low cut and presence", 1);
-    obs_property_list_add_int(profile, "Condenser: extended high end", 2);
-    obs_property_list_add_int(profile, "Ribbon: warm top end", 3);
-    obs_property_list_add_int(profile, "Telephone: narrow band", 4);
-    obs_property_list_add_int(profile, "Vintage radio: band-limited", 5);
-    obs_property_list_add_int(profile, "Tape: saturation and roll-off", 6);
+    hyperdsp::add_native_modes(profile,hyperdsp::mic_modes);
     obs_property_set_long_description(profile,
         "Procedural tone profiles, not measurements or reproductions of named microphones. "
         "These profiles use conventional DSP only.");

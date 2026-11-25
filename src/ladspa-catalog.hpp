@@ -25,21 +25,23 @@ inline std::string catalog_path(){
     char* config=obs_module_config_path("ladspa-catalog.json");
     std::string result=config?config:"";bfree(config);return result;
 }
-inline bool catalog_matches(const CatalogEntry& e,const std::string& query){
-    auto searchable=lower(e.name+" "+e.label+" "+e.maker+" "+e.category+" "+
-        std::filesystem::path(e.path).filename().string()+" "+(e.channels==1?"mono":"stereo")+" ladspa");
+inline bool match_words(std::string searchable,const std::string& query){
+    searchable=lower(std::move(searchable));
     std::istringstream words(lower(query));std::string word;
     while(words>>word)if(searchable.find(word)==std::string::npos)return false;
     return true;
+}
+inline bool catalog_matches(const CatalogEntry& e,const std::string& query){
+    return match_words(e.name+" "+e.label+" "+e.maker+" "+e.category+" "+
+        std::filesystem::path(e.path).filename().string()+" "+(e.channels==1?"mono":"stereo")+" ladspa",query);
 }
 struct CatalogScan {
     static std::string start();
     static std::string status();
     static void stop();
 };
-inline Catalog read_catalog(){
+inline Catalog read_catalog(const std::string& path){
     Catalog entries;
-    const auto path=catalog_path();
     if(path.empty())return entries;
     auto* root=obs_data_create_from_json_file(path.c_str());
     if(!root)return entries;
@@ -62,4 +64,5 @@ inline Catalog read_catalog(){
     obs_data_release(root);
     return entries;
 }
+inline Catalog read_catalog(){return read_catalog(catalog_path());}
 }

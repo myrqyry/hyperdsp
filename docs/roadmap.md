@@ -31,6 +31,8 @@ Standalone conventional audio effects and hosting for OBS, with optional inputs 
 
 - Native three-band resonator bank, five illustrative vowel targets, logarithmic morphing and independent resonance offsets/gains via the four shared routes.
 
+- Unified metadata inventory covering 38 native processing modes and scanned LADSPA descriptors; shared native OBS selectors, token search and versioned CLI JSON.
+
 ## Next layers
 
 - Unified discoverable effect library: favorites, native/installed external/community definitions, backend compatibility, descriptions, safe explicit acquisition and reusable presets. Reset/import/export and a compact native frequency-response view.

@@ -107,6 +107,17 @@ Both backends accept Sight motion energy, hand X, hand Y and pinch closeness thr
 
 The adapter validates procedure version, buffer size, sequence, dimensions, kind, bounds and availability as appropriate to each contract. Duplicate, disabled, missing or unavailable tracking channels contribute zero. Sight snapshots are requested with a 500 ms maximum age; the shared worker also expires local snapshots after 500 ms and the matrix smooths changes over 10 ms. Named tracking channels follow Sight's own naming semantics (not UUIDs). No producer is rendered or started by HyperDSP. See [Sight interop verification](docs/sight-interop.md).
 
+### Unified effect inventory
+
+The shared native mode registry drives all eight native OBS filter selectors and lists 38 processing modes (excluding bypass). The `hyperdsp-effects` tool combines this registry with the local scanned LADSPA catalog, without opening any plugin or starting OBS:
+
+```sh
+build/hyperdsp-effects --search "pitch"
+build/hyperdsp-effects --format ladspa --channels 1 --json
+```
+
+Search accepts multiple words in any order, and the versioned JSON inventory includes native source/mode keys or local LADSPA path/label, category, description, format, maker and layout/path eligibility. A missing external catalog still leaves native effects discoverable. The tool is installed under `tools/`. It reports metadata only: eligibility is not audio qualification, and a local library path is not a portable effect identifier. The unified graphical library and graph execution are not yet implemented. See [effect library contract](docs/effect-library.md).
+
 ### Find and scan external effects
 
 In **HyperDSP LADSPA** properties, choose **Scan installed effects**, then **Reload catalog** when the scan finishes. Search and category filters are retained; scanning does not change the active effect. The in-process UI only reads the catalog; a separate Python 3 process probes each library with a three-second timeout. The scan is explicit because native libraries execute code during discovery and again when selected. This is process isolation, not a security sandbox.

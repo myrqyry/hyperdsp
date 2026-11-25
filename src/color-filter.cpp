@@ -1,3 +1,4 @@
+#include "effect-library.hpp"
 #include <obs-module.h>
 #include "framework/dsp/color.hpp"
 #include "framework/obs/route_properties.hpp"
@@ -53,8 +54,7 @@ bool visibility(obs_properties_t* p,obs_property_t* prop,obs_data_t* s){
 obs_properties_t* properties(void*){
     auto* p=obs_properties_create();
     auto* mode=obs_properties_add_list(p,"mode","Color effect",OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_INT);
-    const char* names[]={"Bypass","Tanh saturation","Cubic soft clipping","Hard clipping","Wavefolding","Bitcrusher / sample hold"};
-    for(int i=0;i<6;++i)obs_property_list_add_int(mode,names[i],i);
+    hyperdsp::add_native_modes(mode,hyperdsp::color_modes);
     auto slider=[&](const char* k,const char* n,double lo,double hi,double step,const char* unit=nullptr){
         auto* prop=obs_properties_add_float_slider(p,k,n,lo,hi,step);if(unit)obs_property_float_set_suffix(prop,unit);return prop;
     };

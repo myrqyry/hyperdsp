@@ -1,3 +1,4 @@
+#include "effect-library.hpp"
 #include <obs-module.h>
 #include "framework/dsp/native_filter.hpp"
 #include "interop/external_inputs.hpp"
@@ -125,7 +126,8 @@ obs_properties_t* properties(void*){
         if(suffix)obs_property_float_set_suffix(prop,suffix);
         return prop;
     };
-    auto* mode=list("mode","Filter type",{"Bypass","Low-pass","High-pass","Band-pass","Notch","Peaking EQ","Low shelf","High shelf","Comb (feedforward notch)","All-pass"});
+    auto* mode=obs_properties_add_list(p,"mode","Filter type",OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_INT);
+    hyperdsp::add_native_modes(mode,hyperdsp::filter_modes);
     auto* freq=slider("frequency","Frequency",20,20000,1," Hz");
     obs_property_set_long_description(freq,"Cutoff or center frequency; in comb mode, spacing between notches. Limited to 45% of sample rate.");
     slider("q","Resonance (Q)",.25,12,.01);
