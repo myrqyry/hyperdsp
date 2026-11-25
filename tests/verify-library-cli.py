@@ -19,6 +19,8 @@ assert result["graph_utilities"][0]["id"]=="gain"
 amp=next(e for e in result["effects"] if e.get("label")=="amp_mono")
 assert amp["controls_complete"] and amp["latency_known"] is False
 assert next(p for p in amp["parameters"] if p["key"]=="port_0")["default"]==1
+assert next(p for p in amp["parameters"] if p["key"]=="port_0")["bindable"] is True
+assert params["drive"]["bindable"] is True and not params["oversample"].get("bindable",False)
 assert run("--rate","96000")["sample_rate"]==96000
 for effect in result["effects"]:
     if effect["graph_supported"]:

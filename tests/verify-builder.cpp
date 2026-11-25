@@ -15,6 +15,8 @@
 #include <QDoubleSpinBox>
 #include <QJsonArray>
 #include <QTest>
+#include <QTabWidget>
+#include <QJsonObject>
 #include <obs-module.h>
 #include <cstdio>
 static obs_module_t* loaded_module=nullptr;
@@ -174,6 +176,76 @@ int main(int argc,char** argv){
             QTest::mouseClick(apply,Qt::LeftButton);
             after=obs_source_get_settings(filter);
             ok=ok&&std::string(obs_data_get_string(after,"graph_json")).find("gain")!=std::string::npos;obs_data_release(after);
+            auto* tabs=builder.findChild<QTabWidget*>("builderTabs");
+            auto* macroAdd=builder.findChild<QPushButton*>("addMacro");
+            auto* macroName=builder.findChild<QLineEdit*>("macroName");
+            auto* macroDefault=builder.findChild<QDoubleSpinBox*>("macroDefault");
+            auto* targets=builder.findChild<QComboBox*>("macroTarget");
+            auto* bind=builder.findChild<QPushButton*>("addBinding");
+            auto* bindings=builder.findChild<QTableWidget*>("macroBindings");
+            bool macros=tabs&&macroAdd&&macroName&&macroDefault&&targets&&bind&&bindings;
+            if(macros){
+                tabs->setCurrentIndex(2);QTest::mouseClick(macroAdd,Qt::LeftButton);
+                macroName->setText("Intensity");QTest::keyClick(macroName,Qt::Key_Return);
+                macroDefault->setValue(.25);
+                auto choose=[&](int node,const QString& key){
+                    for(int i=0;i<targets->count();++i){
+                        auto data=targets->itemData(i).toStringList();
+                        if(data.size()==2&&data[0].toInt()==node&&data[1]==key){
+                            targets->setCurrentIndex(i);QTest::mouseClick(bind,Qt::LeftButton);return true;
+                        }
+                    }
+                    return false;
+                };
+                macros=choose(0,"drive")&&choose(1,"gain_db");
+                auto control=builder.draft().value("controls").toArray()[0].toObject();
+                auto id=control.value("id").toString();
+                macros=macros&&control.value("name")=="Intensity"&&control.value("default").toDouble()==.25&&bindings->rowCount()==2;
+                auto* low=qobject_cast<QDoubleSpinBox*>(bindings->cellWidget(0,1));
+                auto* high=qobject_cast<QDoubleSpinBox*>(bindings->cellWidget(0,2));
+                macros=macros&&low&&high;
+                if(low&&high){low->setValue(0);high->setValue(24);}
+                low=qobject_cast<QDoubleSpinBox*>(bindings->cellWidget(1,1));high=qobject_cast<QDoubleSpinBox*>(bindings->cellWidget(1,2));
+                if(low&&high){low->setValue(0);high->setValue(-6);}else macros=false;
+                auto* data=obs_source_get_settings(filter);
+                auto beforeMacro=std::string(obs_data_get_string(data,"graph_json"));obs_data_release(data);
+                macros=macros&&beforeMacro.find("Intensity")==std::string::npos;
+                QTest::mouseClick(apply,Qt::LeftButton);
+                auto* props=obs_source_properties(filter);
+                auto key=("graph_control_"+id).toUtf8();
+                auto* prop=props?obs_properties_get(props,key.constData()):nullptr;
+                macros=macros&&prop&&obs_property_get_type(prop)==OBS_PROPERTY_FLOAT;
+                if(props)obs_properties_destroy(props);
+                data=obs_source_get_settings(filter);
+                macros=macros&&std::string(obs_data_get_string(data,"graph_json")).find("Intensity")!=std::string::npos;
+                obs_data_release(data);
+                // Already-bound parameters cannot be bound a second time.
+                for(int t=0;t<targets->count();++t){
+                    auto entry=targets->itemData(t).toStringList();
+                    macros=macros&&entry!=QStringList{"0","drive"}&&entry!=QStringList{"1","gain_db"}&&entry!=QStringList{"0","oversample"};
+                }
+                auto committed=builder.draft();
+                auto* removeBinding=builder.findChild<QPushButton*>("removeBinding");
+                auto* removeMacro=builder.findChild<QPushButton*>("removeMacro");
+                macros=macros&&removeBinding&&removeMacro;
+                if(removeBinding){
+                    bindings->selectRow(1);QTest::mouseClick(removeBinding,Qt::LeftButton);
+                    macros=macros&&bindings->rowCount()==1;
+                }
+                auto routed=committed;
+                routed["routes"]=QJsonArray{QJsonObject{{"control",id},{"source",1},{"amount",.25}}};
+                builder.setDraft(routed);
+                if(removeMacro)QTest::mouseClick(removeMacro,Qt::LeftButton);
+                macros=macros&&builder.draft()==routed;
+                builder.setDraft(committed);
+                if(removeMacro)QTest::mouseClick(removeMacro,Qt::LeftButton);
+                macros=macros&&builder.draft().value("controls").toArray().isEmpty();
+                data=obs_source_get_settings(filter);
+                macros=macros&&std::string(obs_data_get_string(data,"graph_json")).find("Intensity")!=std::string::npos;
+                obs_data_release(data);
+                builder.setDraft(committed);
+            }
+            std::printf("BUILDER_MACROS_PASS=%d\n",macros);ok=ok&&macros;
             QTest::qWait(80);
             if(qEnvironmentVariableIsSet("HYPERDSP_BUILDER_SCREENSHOT"))builder.grab().save(qEnvironmentVariable("HYPERDSP_BUILDER_SCREENSHOT"));
         }

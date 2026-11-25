@@ -2,9 +2,9 @@
 #include "effect-library.hpp"
 #include "framework/dsp/parameter_schema.hpp"
 namespace hyperdsp {
-inline void number_parameter(obs_data_array_t* items,const char* key,const char* name,double min,double max,double step,double initial,const char* unit){
+inline void number_parameter(obs_data_array_t* items,const char* key,const char* name,double min,double max,double step,double initial,const char* unit,bool bindable=true){
     auto* item=obs_data_create();obs_data_set_string(item,"key",key);obs_data_set_string(item,"name",name);
-    obs_data_set_string(item,"type","number");obs_data_set_string(item,"unit",unit);
+    obs_data_set_string(item,"type","number");obs_data_set_bool(item,"bindable",bindable);obs_data_set_string(item,"unit",unit);
     obs_data_set_double(item,"min",min);obs_data_set_double(item,"max",max);
     obs_data_set_double(item,"step",step);obs_data_set_double(item,"default",initial);
     obs_data_array_push_back(items,item);obs_data_release(item);
@@ -40,7 +40,7 @@ inline void graph_metadata(obs_data_t* item,const hyperdsp::EffectEntry& e,unsig
             auto initial=c.integer||c.toggle?std::clamp(std::round(c.initial),c.min,c.max):c.initial;
             auto k=key(c.port);
             if(c.toggle){const unsigned choices[]={0,1};choice_parameter(params,k.c_str(),c.name.c_str(),unsigned(initial),choices);}
-            else number_parameter(params,k.c_str(),c.name.c_str(),c.min,c.max,c.integer?1:.001,initial,"");
+            else number_parameter(params,k.c_str(),c.name.c_str(),c.min,c.max,c.integer?1:.001,initial,"",!c.integer);
         }
     }else if(e.source=="hyperdsp_color_filter"){
         parameter_list(params,ColorSettings{},color_parameters);

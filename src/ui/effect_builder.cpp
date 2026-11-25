@@ -44,6 +44,7 @@
 #include <functional>
 #include <set>
 #include <QTabWidget>
+#include <QUuid>
 #include <cmath>
 #include <jansson.h>
 namespace hyperdsp {
@@ -267,7 +268,7 @@ EffectBuilder::EffectBuilder(QWidget* parent):QWidget(parent),draft_(empty()){
     connect(layout,&QPushButton::clicked,this,[this]{positions_.clear();redraw();fitCanvas();});
     auto* remove=button("Remove node","removeNode",this);outputRow->addWidget(remove);viewLayout->addLayout(outputRow);
     split->addWidget(viewPanel);
-    auto* tabs=new QTabWidget;auto* libraryPanel=new QWidget;auto* libLayout=new QVBoxLayout(libraryPanel);libLayout->setContentsMargins(3,3,3,3);
+    auto* tabs=new QTabWidget;tabs->setObjectName("builderTabs");auto* libraryPanel=new QWidget;auto* libLayout=new QVBoxLayout(libraryPanel);libLayout->setContentsMargins(3,3,3,3);
     search_=new QLineEdit;search_->setObjectName("search");search_->setPlaceholderText("Search effects, makers, categories…");
     library_=new QListWidget;library_->setObjectName("library");library_->setAlternatingRowColors(true);
     auto* add=button("Add selected effect","addNode",this);auto* scan=button("Scan installed","scanEffects",this);auto* reload=button("Reload","reloadEffects",this);
@@ -283,7 +284,36 @@ EffectBuilder::EffectBuilder(QWidget* parent):QWidget(parent),draft_(empty()){
     inspectorLayout->addWidget(edges_);
     auto* edgeButtons=new QHBoxLayout;auto* addInput=button("+ Input","addInput",this),*removeInput=button("− Input","removeInput",this);
     edgeButtons->addWidget(addInput);edgeButtons->addWidget(removeInput);inspectorLayout->addLayout(edgeButtons);
-    tabs->addTab(inspector,"Inspector");split->addWidget(tabs);split->setStretchFactor(0,1);split->setStretchFactor(1,1);root->addWidget(split,1);
+    tabs->addTab(inspector,"Inspector");
+    auto* macroPanel=new QWidget;auto* macroLayout=new QVBoxLayout(macroPanel);macroLayout->setContentsMargins(3,3,3,3);
+    auto* macroRow=new QHBoxLayout;macros_=new QComboBox;macros_->setObjectName("macros");
+    addMacro_=button("+ Control","addMacro",this);removeMacro_=button("Remove","removeMacro",this);
+    macroRow->addWidget(macros_,1);macroRow->addWidget(addMacro_);macroRow->addWidget(removeMacro_);macroLayout->addLayout(macroRow);
+    auto* macroForm=new QFormLayout;macroName_=new QLineEdit;macroName_->setObjectName("macroName");macroName_->setMaxLength(80);
+    macroDefault_=new QDoubleSpinBox;macroDefault_->setObjectName("macroDefault");macroDefault_->setRange(0,1);macroDefault_->setDecimals(3);macroDefault_->setSingleStep(.05);
+    macroForm->addRow("Name",macroName_);macroForm->addRow("Default (0–1)",macroDefault_);macroLayout->addLayout(macroForm);
+    macroBindings_=new QTableWidget(0,3);macroBindings_->setObjectName("macroBindings");macroBindings_->setHorizontalHeaderLabels({"Target","At 0","At 1"});
+    macroBindings_->horizontalHeader()->setSectionResizeMode(0,QHeaderView::Stretch);
+    macroBindings_->horizontalHeader()->setSectionResizeMode(1,QHeaderView::ResizeToContents);
+    macroBindings_->horizontalHeader()->setSectionResizeMode(2,QHeaderView::ResizeToContents);
+    macroBindings_->verticalHeader()->hide();macroBindings_->setSelectionBehavior(QAbstractItemView::SelectRows);macroLayout->addWidget(macroBindings_,1);
+    auto* bindingRow=new QHBoxLayout;macroTarget_=new QComboBox;macroTarget_->setObjectName("macroTarget");
+    macroTarget_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);macroTarget_->setMinimumContentsLength(12);
+    addBinding_=button("+ Bind","addBinding",this);removeBinding_=button("− Bind","removeBinding",this);
+    bindingRow->addWidget(macroTarget_,1);bindingRow->addWidget(addBinding_);bindingRow->addWidget(removeBinding_);macroLayout->addLayout(bindingRow);
+    tabs->addTab(macroPanel,"Controls");
+    connect(macros_,&QComboBox::currentIndexChanged,this,[this]{inspectMacro();});
+    connect(addMacro_,&QPushButton::clicked,this,[this]{addMacro();});
+    connect(removeMacro_,&QPushButton::clicked,this,[this]{removeMacro();});
+    connect(macroName_,&QLineEdit::editingFinished,this,[this]{
+        auto name=macroName_->text().trimmed();
+        if(name.isEmpty()||name.toUtf8().size()>80){message("Control name must be 1–80 UTF-8 bytes.",true);inspectMacro();return;}
+        changeMacro("name",name);if(macros_->currentIndex()>=0)macros_->setItemText(macros_->currentIndex(),name);
+    });
+    connect(macroDefault_,&QDoubleSpinBox::valueChanged,this,[this](double v){changeMacro("default",v);});
+    connect(addBinding_,&QPushButton::clicked,this,[this]{addBinding();});
+    connect(removeBinding_,&QPushButton::clicked,this,[this]{removeBinding();});
+    split->addWidget(tabs);split->setStretchFactor(0,1);split->setStretchFactor(1,1);root->addWidget(split,1);
     status_=new QLabel;status_->setTextFormat(Qt::PlainText);status_->setWordWrap(true);root->addWidget(status_);
     connect(refresh,&QPushButton::clicked,this,[this]{refreshTargets();});
     connect(load,&QPushButton::clicked,this,[this]{loadTarget();});
@@ -291,7 +321,7 @@ EffectBuilder::EffectBuilder(QWidget* parent):QWidget(parent),draft_(empty()){
     connect(add,&QPushButton::clicked,this,[this,tabs]{addNode();if(selected_>=0)tabs->setCurrentIndex(1);});
     connect(library_,&QListWidget::itemDoubleClicked,this,[this,tabs]{addNode();if(selected_>=0)tabs->setCurrentIndex(1);});
     connect(scan,&QPushButton::clicked,this,[this]{message(qs(CatalogScan::start()));});
-    connect(reload,&QPushButton::clicked,this,[this]{inventory_=inventory();refreshLibrary();inspect();message(qs(CatalogScan::status()));});
+    connect(reload,&QPushButton::clicked,this,[this]{inventory_=inventory();refreshLibrary();inspect();refreshMacros();message(qs(CatalogScan::status()));});
     connect(scene_,&QGraphicsScene::selectionChanged,this,[this,tabs]{
         auto items=scene_->selectedItems();if(items.isEmpty())return;
         auto* item=items.first();
@@ -396,7 +426,7 @@ QJsonObject EffectBuilder::metadata(const QString& id)const{
     for(auto e:inventory_)if(e.toObject().value("id").toString()==id)return e.toObject();
     return {{"id",id},{"name",id}};
 }
-void EffectBuilder::setDraft(const QJsonObject& d){draft_=d;positions_.clear();selected_=d.value("output").toInt(-1);redraw();inspect();fitCanvas();}
+void EffectBuilder::setDraft(const QJsonObject& d){draft_=d;positions_.clear();{QSignalBlocker b(macros_);macros_->clear();}selected_=d.value("output").toInt(-1);redraw();inspect();fitCanvas();}
 void EffectBuilder::fitCanvas(){
     graph_->resetTransform();
     const auto bounds=scene_->sceneRect();
@@ -439,7 +469,7 @@ void EffectBuilder::redraw(){
     }
     card("OUTPUT",output_id,100,"terminal");
     output_->setCurrentIndex(output_->findData(out));
-    redrawWires();refreshTheme();scene_->setSceneRect(scene_->itemsBoundingRect().adjusted(-30,-30,30,30));
+    redrawWires();refreshTheme();refreshMacros();scene_->setSceneRect(scene_->itemsBoundingRect().adjusted(-30,-30,30,30));
     fitCanvas();
 }
 void EffectBuilder::redrawWires(){
@@ -560,6 +590,111 @@ void EffectBuilder::inspect(){
         connect(from,&QComboBox::currentIndexChanged,this,change);connect(weight,&QDoubleSpinBox::valueChanged,this,change);
         edges_->setCellWidget(row,0,from);edges_->setCellWidget(row,1,weight);
     }
+}
+QJsonObject EffectBuilder::bindingMetadata(int node,const QString& key)const{
+    auto nodes=draft_.value("nodes").toArray();
+    if(node<0||node>=nodes.size())return {};
+    for(auto value:metadata(nodes[node].toObject().value("effect").toString()).value("parameters").toArray()){
+        auto p=value.toObject();
+        if(p.value("key").toString()==key&&p.value("type")=="number"&&p.value("bindable").toBool(false))return p;
+    }
+    return {};
+}
+void EffectBuilder::refreshMacros(){
+    if(!macros_)return;
+    auto old=macros_->currentData().toString();
+    auto controls=draft_.value("controls").toArray();
+    {QSignalBlocker block(macros_);macros_->clear();
+        for(int i=0;i<std::min<qsizetype>(controls.size(),8);++i){
+            auto c=controls[i].toObject();macros_->addItem(c.value("name").toString(),c.value("id").toString());
+        }
+        int index=macros_->findData(old);if(index>=0)macros_->setCurrentIndex(index);
+    }
+    inspectMacro();
+}
+void EffectBuilder::changeMacro(const QString& key,const QJsonValue& value){
+    auto controls=draft_.value("controls").toArray();int index=macros_->currentIndex();
+    if(index<0||index>=controls.size())return;
+    auto c=controls[index].toObject();c[key]=value;controls[index]=c;draft_["controls"]=controls;
+}
+void EffectBuilder::inspectMacro(){
+    const QSignalBlocker blockName(macroName_),blockDefault(macroDefault_),blockTargets(macroTarget_);
+    auto controls=draft_.value("controls").toArray();int index=macros_->currentIndex();
+    bool active=index>=0&&index<controls.size();
+    macroName_->setEnabled(active);macroDefault_->setEnabled(active);removeMacro_->setEnabled(active);
+    addMacro_->setEnabled(controls.size()<8);
+    macroBindings_->clearContents();macroBindings_->setRowCount(0);macroTarget_->clear();
+    addBinding_->setEnabled(false);removeBinding_->setEnabled(false);
+    macroName_->clear();macroDefault_->setValue(0);
+    if(!active)return;
+    auto c=controls[index].toObject();macroName_->setText(c.value("name").toString());macroDefault_->setValue(c.value("default").toDouble());
+    auto bindings=c.value("bindings").toArray();auto nodes=draft_.value("nodes").toArray();
+    macroBindings_->setRowCount(std::min<qsizetype>(bindings.size(),16));
+    for(int row=0;row<macroBindings_->rowCount();++row){
+        auto b=bindings[row].toObject();int node=b.value("node").toInt(-1);auto key=b.value("parameter").toString();
+        auto p=bindingMetadata(node,key);
+        auto* label=new QTableWidgetItem(QString::number(node+1)+" · "+p.value("name").toString(key));
+        label->setFlags(label->flags()&~Qt::ItemIsEditable);macroBindings_->setItem(row,0,label);
+        for(int col=1;col<3;++col){
+            auto field=col==1?QString("low"):QString("high");auto* spin=new QDoubleSpinBox;
+            const auto step=p.value("step").toDouble(.01);
+            spin->setDecimals(std::clamp(int(std::ceil(-std::log10(std::max(.000001,step)))),2,6));
+            spin->setRange(p.value("min").toDouble(-1e9),p.value("max").toDouble(1e9));
+            spin->setSingleStep(std::max(.000001,p.value("step").toDouble(.01)));spin->setSuffix(p.value("unit").toString());
+            spin->setValue(b.value(field).toDouble());spin->setEnabled(!p.isEmpty());
+            connect(spin,&QDoubleSpinBox::valueChanged,this,[this,row,field](double v){
+                auto controls=draft_.value("controls").toArray();int i=macros_->currentIndex();
+                if(i<0||i>=controls.size())return;auto bindings=controls[i].toObject().value("bindings").toArray();
+                if(row>=bindings.size())return;auto b=bindings[row].toObject();b[field]=v;bindings[row]=b;
+                changeMacro("bindings",bindings);
+            });
+            macroBindings_->setCellWidget(row,col,spin);
+        }
+    }
+    std::set<std::pair<int,QString>> used;int total=0;
+    for(auto control:controls)for(auto binding:control.toObject().value("bindings").toArray()){
+        auto b=binding.toObject();used.emplace(b.value("node").toInt(-1),b.value("parameter").toString());++total;
+    }
+    for(int node=0;node<std::min<qsizetype>(nodes.size(),16);++node){
+        auto meta=metadata(nodes[node].toObject().value("effect").toString());
+        for(auto value:meta.value("parameters").toArray()){
+            auto p=value.toObject();auto key=p.value("key").toString();
+            if(p.value("type")!="number"||!p.value("bindable").toBool()||used.contains({node,key}))continue;
+            macroTarget_->addItem(QString::number(node+1)+" · "+effectName(meta)+" / "+p.value("name").toString(),QStringList{QString::number(node),key});
+        }
+    }
+    addBinding_->setEnabled(macroTarget_->count()>0&&bindings.size()<16&&total<32);
+    removeBinding_->setEnabled(!bindings.isEmpty());
+}
+void EffectBuilder::addMacro(){
+    auto controls=draft_.value("controls").toArray();if(controls.size()>=8)return;
+    // New IDs are never recycled into unrelated saved scene control values.
+    auto id=QString("c_")+QUuid::createUuid().toString(QUuid::Id128).left(30);
+    controls.append(QJsonObject{{"id",id},{"name",QString("Control %1").arg(controls.size()+1)},{"default",.5},{"bindings",QJsonArray{}}});
+    draft_["controls"]=controls;refreshMacros();macros_->setCurrentIndex(macros_->findData(id));
+    message("Control added to draft. Bind at least one parameter before Apply.");
+}
+void EffectBuilder::removeMacro(){
+    auto controls=draft_.value("controls").toArray();int i=macros_->currentIndex();if(i<0||i>=controls.size())return;
+    auto id=controls[i].toObject().value("id");
+    for(auto route:draft_.value("routes").toArray())if(route.toObject().value("control")==id){
+        message("This control has a modulation route. Remove the route from the graph definition first.",true);return;
+    }
+    controls.removeAt(i);draft_["controls"]=controls;refreshMacros();message("Control removed from draft.");
+}
+void EffectBuilder::addBinding(){
+    if(!addBinding_->isEnabled())return;
+    auto target=macroTarget_->currentData().toStringList();if(target.size()!=2)return;
+    int node=target[0].toInt();auto key=target[1];auto p=bindingMetadata(node,key);if(p.isEmpty())return;
+    auto controls=draft_.value("controls").toArray();int i=macros_->currentIndex();if(i<0||i>=controls.size())return;
+    auto bindings=controls[i].toObject().value("bindings").toArray();
+    bindings.append(QJsonObject{{"node",node},{"parameter",key},{"low",p.value("min")},{"high",p.value("max")}});
+    changeMacro("bindings",bindings);inspectMacro();message("Binding added. Edit its endpoints to set the control response.");
+}
+void EffectBuilder::removeBinding(){
+    auto controls=draft_.value("controls").toArray();int i=macros_->currentIndex();if(i<0||i>=controls.size())return;
+    auto bindings=controls[i].toObject().value("bindings").toArray();int row=macroBindings_->currentRow();
+    if(row<0||row>=bindings.size())return;bindings.removeAt(row);changeMacro("bindings",bindings);inspectMacro();
 }
 void EffectBuilder::addNode(){
     auto* item=library_->currentItem();if(!item||!(item->flags()&Qt::ItemIsEnabled))return;

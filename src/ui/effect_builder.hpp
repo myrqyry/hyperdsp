@@ -6,7 +6,7 @@
 #include <vector>
 #include <map>
 #include <QPointF>
-class QComboBox;class QLineEdit;class QListWidget;class QGraphicsView;class QGraphicsScene;class QLabel;class QFormLayout;class QTableWidget;class QScrollArea;
+class QDoubleSpinBox;class QPushButton;class QComboBox;class QLineEdit;class QListWidget;class QGraphicsView;class QGraphicsScene;class QLabel;class QFormLayout;class QTableWidget;class QScrollArea;
 namespace hyperdsp {
 class EffectBuilder final:public QWidget {
 public:
@@ -29,6 +29,19 @@ private:
     QGraphicsScene* scene_;
     QFormLayout* parameters_;
     QTableWidget* edges_;
+    QComboBox *macros_=nullptr,*macroTarget_=nullptr;
+    QLineEdit* macroName_=nullptr;
+    QDoubleSpinBox* macroDefault_=nullptr;
+    QTableWidget* macroBindings_=nullptr;
+    QPushButton *addMacro_=nullptr,*removeMacro_=nullptr,*addBinding_=nullptr,*removeBinding_=nullptr;
+    void refreshMacros();
+    void inspectMacro();
+    void changeMacro(const QString&,const QJsonValue&);
+    void addMacro();
+    void removeMacro();
+    void addBinding();
+    void removeBinding();
+    QJsonObject bindingMetadata(int node,const QString& key)const;
     QLabel* status_=nullptr;
     bool statusError_=false;
     void refreshTargets();
