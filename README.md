@@ -17,7 +17,13 @@ The first verified target is the microphone coloration filter: dynamic, condense
 
 ## Build and test (Linux)
 
-Requires a C++20 compiler, CMake, OBS development headers and libobs. Run `tests/verify.sh` for the DSP unit test and real OBS post-filter stereo capture test. No model, download, audio device or neural dependency is needed.
+Requires a C++20 compiler, CMake, OBS development headers, libobs, and LADSPA SDK headers (on Mint: ladspa-sdk). Run `tests/verify.sh` for the DSP unit test and real OBS post-filter stereo capture test. No model, download, audio device or neural dependency is needed.
+
+## LADSPA filter
+
+Add **HyperDSP LADSPA** to an audio source. Select a trusted native LADSPA shared library and enter its exact plugin label (for example, `/usr/lib/ladspa/amp.so` and `amp_stereo`). The filter generates numeric and toggle controls from port metadata. Mono effects use independent instances per OBS audio channel; stereo effects require a stereo OBS layout. Only equal-input/output mono or stereo effects declaring hard-real-time capability are accepted. Unsupported configurations, missing libraries and invalid labels bypass audio.
+
+Use `analyseplugin /path/to/plugin.so` to see available labels. Only load trusted plugins: this backend executes native code in the OBS process, not a sandbox. The initial host does not provide a library browser, latency compensation, sidechains, control-output meters or custom plugin interfaces. The audio test uses the real LADSPA SDK amplifier when installed; without it the LADSPA integration test is not registered.
 
 ## Migration status
 
@@ -29,7 +35,7 @@ The production migration must remove Mic DSP from Sound's enabled effect sets, r
 
 ## Direction
 
-A standalone OBS DSP host with programmable effects (JSFX/Faust candidates) and native audio plugin hosting (CLAP/LV2 candidates). These are future capabilities, not currently implemented.
+A standalone OBS DSP host with programmable effects (JSFX/Faust candidates) and native audio plugin hosting (LADSPA implemented; CLAP/LV2 candidates). JSFX integration needs a license compatibility review before linking YSFX (Apache-2.0) to the inherited GPL-2.0 code. Faust, CLAP and LV2 are not implemented.
 
 ## Provenance
 
