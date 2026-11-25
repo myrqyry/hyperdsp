@@ -47,6 +47,12 @@ Nonlinear modes offer optional 2× or 4× filtered oversampling using windowed-s
 
 Four shared modulation routes control drive, bit depth, sample hold, wet/dry and output amplitude in destination units, including optional Sight and Sound inputs. As with other native effects, the underlying engine is independent of OBS and can be reused in future effect graphs. See [color verification](docs/color.md).
 
+## Native time effects
+
+Add **HyperDSP Time** for delay/echo, stereo ping-pong, two-tap chorus, flanger, vibrato or unprocessed bypass. Echo supports up to two seconds of fractional delay per channel, signed feedback (−0.95 to +0.95) and one-pole feedback damping. Ping-pong crosses adjacent channel pairs, with ordinary delay for unpaired channels. Chorus averages two phase-offset moving taps without feedback; flanger uses a short moving tap with signed feedback; vibrato uses a moving tap without feedback (set wet/dry to 100% for pure vibrato). Chorus/vibrato center and excursion are bounded to 40 ms, flanger to 10 ms. Stereo phase spread offsets odd-channel oscillators by up to half a cycle. The mode change picker substitutes an appropriate short-delay center when the existing delay exceeds that mode's range.
+
+Four shared modulation routes target delay, feedback, depth, rate, wet/dry and output amplitude, including optional Sound and Sight. Continuous settings ramp over 10 ms; changing mode clears delay history and oscillator phase. Moving or abruptly retargeting a delay can produce pitch shifts; there is no tempo synchronization or crossfaded delay retiming yet. The reusable fractional-delay primitive allocates storage for the actual configured channel count and sample rate on reset, not inside audio processing. See [time effects verification](docs/time-effects.md).
+
 ## LADSPA filter
 
 Add **HyperDSP LADSPA** to an audio source. Search the effect catalog by name, label or maker, narrow by category, and choose an effect from the native OBS properties. Switching catalog effects clears the previous effect's port values so the new effect starts at its own defaults. Manual trusted library path and exact label (for example, `/usr/lib/ladspa/amp.so` and `amp_stereo`) remain available. The filter generates numeric and toggle controls from port metadata. Mono effects use independent instances per OBS audio channel; stereo effects require a stereo OBS layout. Only equal-input/output mono or stereo effects declaring hard-real-time capability are accepted. Unsupported configurations, missing libraries and invalid labels bypass audio.
