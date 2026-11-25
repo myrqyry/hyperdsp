@@ -69,6 +69,12 @@ Pitch shift (±24 semitones) multiplies partial frequencies; frequency shift (±
 
 Four reactive routes target threshold, attenuation, freeze hold, spectral memory time, mix, output amplitude, pitch and frequency shift. Spectral parameters are sampled at analysis hops; the shared mixer runs per sample. Optional Sound and Sight inputs remain supported. Mode changes reset spectral history; no crossfade or tail preservation. See [spectral verification](docs/spectral-effects.md).
 
+## Native formants and resonators
+
+**HyperDSP Formant** provides vowel morphing between five illustrative A/E/I/O/U resonance profiles or a custom three-band resonator bank. Each custom band has an independent center frequency (40–16000 Hz), nominal bandwidth (20–4000 Hz) and gain (−36 to +6 dB). The vowel morph interpolates centers and bandwidths logarithmically and gains in dB. Resonance shift (±24 semitones) scales the entire bank without transposing input frequencies; bandwidth scale (0.25–4×) changes resonance sharpness. Actual center/Q are bounded at the current sample rate.
+
+The bank uses three parallel normalized TPT band-pass sections, with independent channel state and shared coefficients, and adds no fixed sample-buffer delay. The wet output is a weighted sum divided by three. Four reactive routes can drive morph, resonance shift, width, each band's frequency offset and gain, wet/dry and output amplitude. Optional Sight/Sound signals use the existing adapter. Continuous controls ramp over 10 ms; switching between bypass, vowel and custom modes resets filter state. This is creative resonance shaping, not a measured vocal-tract model or automatic formant-preserving pitch correction. See [formant verification](docs/formant-effects.md).
+
 ## LADSPA filter
 
 Add **HyperDSP LADSPA** to an audio source. Search the effect catalog by name, label or maker, narrow by category, and choose an effect from the native OBS properties. Switching catalog effects clears the previous effect's port values so the new effect starts at its own defaults. Manual trusted library path and exact label (for example, `/usr/lib/ladspa/amp.so` and `amp_stereo`) remain available. The filter generates numeric and toggle controls from port metadata. Mono effects use independent instances per OBS audio channel; stereo effects require a stereo OBS layout. Only equal-input/output mono or stereo effects declaring hard-real-time capability are accepted. Unsupported configurations, missing libraries and invalid labels bypass audio.

@@ -29,12 +29,14 @@ Standalone conventional audio effects and hosting for OBS, with optional inputs 
 
 - Native peak-region phase-vocoder pitch shift and additive frequency shift within the spectral processor; shared modulation destinations and fixed latency.
 
+- Native three-band resonator bank, five illustrative vowel targets, logarithmic morphing and independent resonance offsets/gains via the four shared routes.
+
 ## Next layers
 
 - Favorites, reusable presets, reset/import/export, better effect descriptions and a compact native frequency-response view.
 - Extend the shared modulation matrix with a destination registry, configurable detector bands, additional backends, external signals and native port smoothing.
 - Extend optional interop to more Sight and Sound signals, handedness selection, Sound category picker and full live-producer qualification; retain versioned procedures, stable UUIDs and missing/stale-data fallback. No inference in HyperDSP and no producer calls on the audio callback.
 - Dedicated serial/parallel effect graph and eventual Effect Builder dock, following HyperShader’s existing Shader Builder interaction and recovery patterns. See [Effect Builder direction](effect-builder.md). Latency compensation and alignment; sidechains and appropriate oversampling for nonlinear effects.
-- Reverb quality enhancements (denser diffusion, smoother room retiming, convolution); additional delay enhancements (tempo sync, crossfaded retiming) and additional creative filters/effects: formant resonances, morphing responses, formant preservation, higher-quality pitch/transient processing and adaptive noise profiles; auto-wah can already be configured with the native envelope-controlled filter.
+- Reverb quality enhancements (denser diffusion, smoother room retiming, convolution); additional delay enhancements (tempo sync, crossfaded retiming) and additional creative filters/effects: general filter morphing, formant preservation, higher-quality pitch/transient processing and adaptive noise profiles; auto-wah can already be configured with the native envelope-controlled filter.
 - Other hosting formats: JSFX (license compatibility review of YSFX), Faust, CLAP, LV2. No unsupported format claims.
 - Finish coordinated Sound Mic DSP ownership migration, isolated coexistence validation, installation and actual OBS UI/audio smoke tests.
