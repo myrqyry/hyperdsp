@@ -29,6 +29,16 @@ Native modulation supports sine, triangle, square and saw LFOs (0.05–20 Hz), a
 
 The numerical suite measures all nine processing modes (plus channel isolation, bounded modulation and envelope response). The OBS suite measures actual low-pass/high-pass, notch, steep cascade, dry bypass, blend and envelope-driven cutoff. It does not qualify all possible settings or measure real-time CPU budgets.
 
+## Native dynamics
+
+Add **HyperDSP Dynamics** to an OBS audio source for compressor, downward expander, noise gate, sample-peak limiter or unprocessed bypass. The reusable DSP engine links channels through their maximum absolute input sample, with instantaneous detector rise and exponential decay, and applies a common smoothed gain to preserve stereo balance. Compressor and expander have adjustable ratio (1:1–20:1), threshold (−80–0 dBFS), soft knee (0–24 dB), attack and release. Expander and gate offer attenuation range; gate additionally has hold and hysteresis. Makeup, input/output trim and wet/dry mixing are included.
+
+The limiter uses immediate attenuation and release smoothing, with a final wet-branch sample ceiling even with makeup applied. It has no lookahead or true-peak/intersample protection; dry mixing and output trim can exceed its ceiling, and the OBS adapter can bypass during a concurrent settings update or unsupported audio format. Do not use this as a guaranteed broadcast safety limiter. No separate sidechain or RMS detector yet.
+
+All four shared modulation routes are available, including optional Sound and Sight signals. Destinations are threshold, ratio, makeup, attenuation range, mix and output amplitude, with signed amounts in destination units and per-destination bounds. Only parameters used by the current dynamics mode affect processing. A reusable OBS route-property helper supports future native effect adapters.
+
+Numerical and real libobs tests cover static curves, stereo linkage, soft knee, gate hold/hysteresis, sample ceiling across 44.1/48/96 kHz, nonfinite sample handling, bypass and Sound-driven attenuation using the versioned contract fixture. See [dynamics verification](docs/dynamics.md).
+
 ## LADSPA filter
 
 Add **HyperDSP LADSPA** to an audio source. Search the effect catalog by name, label or maker, narrow by category, and choose an effect from the native OBS properties. Switching catalog effects clears the previous effect's port values so the new effect starts at its own defaults. Manual trusted library path and exact label (for example, `/usr/lib/ladspa/amp.so` and `amp_stereo`) remain available. The filter generates numeric and toggle controls from port metadata. Mono effects use independent instances per OBS audio channel; stereo effects require a stereo OBS layout. Only equal-input/output mono or stereo effects declaring hard-real-time capability are accepted. Unsupported configurations, missing libraries and invalid labels bypass audio.
