@@ -83,7 +83,7 @@ int main(int argc,char**argv) {
     auto* filter=obs_source_create("hyperdsp_ladspa_filter","ladspa",settings,nullptr);
     if(!source||!filter)return 6;
     auto* props=obs_source_properties(filter);
-    bool prop_ok=props && obs_properties_get(props,"port_0");
+    bool prop_ok=props && obs_properties_get(props,"port_0") && obs_properties_get(props,"mix") && obs_properties_get(props,"input_db") && obs_properties_get(props,"output_db");
     auto* browser=props?obs_properties_get(props,"catalog_effect"):nullptr;
     auto* search=props?obs_properties_get(props,"catalog_search"):nullptr;
     auto* category=props?obs_properties_get(props,"catalog_category"):nullptr;
@@ -150,10 +150,27 @@ int main(int argc,char**argv) {
     obs_data_set_double(settings,"port_0",.5);
     obs_source_update(filter,settings);
     auto louder=measure();
+    obs_data_set_double(settings,"mix",.5);
+    obs_source_update(filter,settings);
+    auto blend=measure();
+    obs_data_set_double(settings,"mix",0.);
+    obs_data_set_double(settings,"input_db",-6.020599913);
+    obs_data_set_double(settings,"output_db",6.020599913);
+    obs_source_update(filter,settings);
+    auto bypass=measure();
+    obs_data_set_double(settings,"mix",1.);
+    obs_source_update(filter,settings);
+    auto unity=measure();
+    obs_data_set_double(settings,"output_db",0.);
+    obs_source_update(filter,settings);
+    auto trim=measure();
+    obs_data_set_double(settings,"input_db",0.);
+    obs_source_update(filter,settings);
     obs_data_set_string(settings,"label","amp_mono");
     obs_data_set_double(settings,"port_0",.75);
     obs_source_update(filter,settings);
     auto mono=measure();
+    obs_data_set_double(settings,"output_db",12.);
     obs_data_set_string(settings,"label","unknown_label");
     obs_source_update(filter,settings);
     auto unknown=measure();
@@ -163,9 +180,14 @@ int main(int argc,char**argv) {
     auto near=[](double a,double b){return std::abs(a-b)<.005;};
     bool pass=prop_ok && browser_ok && near(quiet[0],.4/std::sqrt(2.)*.25) && near(quiet[1],.16/std::sqrt(2.)*.25)
         && near(louder[0],quiet[0]*2) && near(louder[1],quiet[1]*2)
+        && near(blend[0],.4/std::sqrt(2.)*.75) && near(blend[1],.16/std::sqrt(2.)*.75)
+        && near(bypass[0],.4/std::sqrt(2.)) && near(bypass[1],.16/std::sqrt(2.))
+        && near(unity[0],louder[0]) && near(unity[1],louder[1])
+        && near(trim[0],louder[0]*.5) && near(trim[1],louder[1]*.5)
         && near(mono[0],.4/std::sqrt(2.)*.75) && near(mono[1],.16/std::sqrt(2.)*.75)
         && near(unknown[0],.4/std::sqrt(2.)) && near(unknown[1],.16/std::sqrt(2.))
         && near(dry[0],.4/std::sqrt(2.)) && near(dry[1],.16/std::sqrt(2.));
+    std::printf("MIX_OBS blend=%g,%g bypass=%g,%g unity=%g,%g trim=%g,%g\n",blend[0],blend[1],bypass[0],bypass[1],unity[0],unity[1],trim[0],trim[1]);
     std::printf("LADSPA_OBS_ACTUAL quiet=%g,%g louder=%g,%g mono=%g,%g unknown=%g,%g dry=%g,%g controls=%d browser=%d pass=%d\n",
         quiet[0],quiet[1],louder[0],louder[1],mono[0],mono[1],unknown[0],unknown[1],dry[0],dry[1],prop_ok,browser_ok,pass);
     obs_set_output_source(1,nullptr);

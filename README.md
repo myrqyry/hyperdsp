@@ -25,6 +25,10 @@ Add **HyperDSP LADSPA** to an audio source. Search the effect catalog by name, l
 
 Use `analyseplugin /path/to/plugin.so` to see available labels. Only load trusted plugins: this backend executes native code in the OBS process, not a sandbox. The initial host does not provide preset import/export, latency compensation, sidechains, control-output meters or custom plugin interfaces. Categories are inferred from descriptor names/labels, not authoritative plugin metadata.
 
+### Mix and gain staging
+
+Each LADSPA filter also exposes input gain and output gain (−24 to +24 dB) and a linear wet/dry blend (0–1, default 1). Input gain precedes both the dry branch and the plugin, and output gain follows the blend. With a valid effect, zero wet still applies both trims; an invalid or unavailable effect instead passes the original audio unchanged. Nonfinite processed samples fall back to dry audio. The mixer is backend-independent code; only LADSPA uses it so far. Live settings changes are block-boundary updates; sample-ramped controls, latency compensation and parallel alignment for delayed effects remain future work.
+
 ### Refresh the catalog
 
 After building, run:

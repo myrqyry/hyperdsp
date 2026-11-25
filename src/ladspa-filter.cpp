@@ -1,5 +1,6 @@
 #include <obs-module.h>
 #include "ladspa-catalog.hpp"
+#include "framework/dsp/effect_mix.hpp"
 #include <ladspa.h>
 #include <dlfcn.h>
 #include <algorithm>
@@ -60,6 +61,7 @@ struct Instance {
     std::vector<unsigned> in,out;
     std::vector<Control> controls;
     unsigned rate=0, channels=0;
+    hyperdsp::MixSettings mix;
     std::string path,label;
     ~Instance() {
         if(descriptor)for(auto& v:voices)if(v->handle){
@@ -69,6 +71,8 @@ struct Instance {
         if(library)dlclose(library);
     }
     void parameters(obs_data_t* settings) {
+        mix=hyperdsp::MixSettings::from(obs_data_get_double(settings,"mix"),
+            obs_data_get_double(settings,"input_db"),obs_data_get_double(settings,"output_db"));
         for(auto& c:controls){
             auto k=key(c.port);
             if(c.toggle)obs_data_set_default_bool(settings,k.c_str(),c.initial!=0);
@@ -134,12 +138,12 @@ struct Instance {
                 auto& v=*voices[i];
                 for(unsigned c=0;c<in.size();++c){
                     auto* samples=reinterpret_cast<float*>(audio->data[i*in.size()+c])+off;
-                    std::copy_n(samples,n,v.input[c].data());
+                    for(unsigned j=0;j<n;++j)v.input[c][j]=mix.input(samples[j]);
                 }
                 descriptor->run(v.handle,n);
                 for(unsigned c=0;c<out.size();++c){
                     auto* samples=reinterpret_cast<float*>(audio->data[i*in.size()+c])+off;
-                    for(unsigned j=0;j<n;++j)if(std::isfinite(v.scratch[c][j]))samples[j]=v.scratch[c][j];
+                    for(unsigned j=0;j<n;++j)samples[j]=mix.output(samples[j],mix.input(samples[j]),v.scratch[c][j]);
                 }
             }
             off+=n;
@@ -154,6 +158,11 @@ bool format(unsigned& rate,unsigned& channels){
     return rate&&channels;
 }
 const char* name(void*){return "HyperDSP LADSPA";}
+void defaults(obs_data_t* settings){
+    obs_data_set_default_double(settings,"mix",1.);
+    obs_data_set_default_double(settings,"input_db",0.);
+    obs_data_set_default_double(settings,"output_db",0.);
+}
 void update(void* ptr,obs_data_t* settings){
     auto* f=static_cast<Filter*>(ptr);if(!f)return;
     unsigned rate=0,ch=0;
@@ -252,6 +261,12 @@ obs_properties_t* properties(void* p){
     auto* path=obs_properties_add_path(props,"library","Trusted LADSPA library",OBS_PATH_FILE,"Shared library (*.so)",nullptr);
     obs_property_set_long_description(path,"Native code executes inside OBS. Only choose plugins you trust.");
     auto* label=obs_properties_add_text(props,"label","Plugin label",OBS_TEXT_DEFAULT);
+    auto* input=obs_properties_add_float_slider(props,"input_db","Input gain",-24.,24.,.1);
+    auto* wet=obs_properties_add_float_slider(props,"mix","Wet / dry",0.,1.,.01);
+    auto* output=obs_properties_add_float_slider(props,"output_db","Output gain",-24.,24.,.1);
+    obs_property_float_set_suffix(input," dB");
+    obs_property_float_set_suffix(output," dB");
+    obs_property_set_long_description(wet,"0 = dry, 1 = wet. Input and output gain remain active with a valid effect; missing effects bypass unmodified. No latency compensation.");
     obs_property_set_modified_callback(path,manual_modified);
     obs_property_set_modified_callback(label,manual_modified);
     if(p){auto* f=static_cast<Filter*>(p);std::lock_guard lock(f->mutex);
@@ -269,6 +284,6 @@ obs_audio_data* process(void* p,obs_audio_data* audio){
 extern "C" {
 struct obs_source_info ladspa_filter={
     .id="hyperdsp_ladspa_filter",.type=OBS_SOURCE_TYPE_FILTER,.output_flags=OBS_SOURCE_AUDIO,
-    .get_name=name,.create=create,.destroy=destroy,.get_properties=properties,.update=update,.filter_audio=process,
+    .get_name=name,.create=create,.destroy=destroy,.get_defaults=defaults,.get_properties=properties,.update=update,.filter_audio=process,
 };
 }
