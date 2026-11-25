@@ -1,6 +1,17 @@
 # HyperDSP
 
-Conventional audio processing for OBS Studio, separate from the neural audio sources and filters in Live Latent Lab.Sound.
+Standalone deterministic audio effects and DSP hosting for OBS Studio, the audio counterpart to HyperShader. It is not part of Live Latent Lab.
+
+## Plugin family
+
+| Plugin | Responsibility |
+| --- | --- |
+| HyperDSP | Deterministic audio effects |
+| HyperShader | Deterministic video effects |
+| Live Latent Lab.Sound | Audio AI/ML and derived signals |
+| Live Latent Lab.Sight | Video AI/ML and derived signals |
+
+Both deterministic effect plugins may optionally consume data published by either Lab plugin without owning inference or requiring its installation. HyperDSP must keep working independently. Future signal consumers should reuse the existing versioned OBS interfaces, read outside the real-time audio callback, and safely handle missing or stale inputs. Signal integration in HyperDSP is planned, not implemented.
 
 The first verified target is the microphone coloration filter: dynamic, condenser, ribbon, telephone, vintage radio, tape and dry bypass, with spectral sweep and resonance controls. These are procedural tones, not measured microphone reproductions.
 
