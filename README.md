@@ -21,9 +21,21 @@ Requires a C++20 compiler, CMake, OBS development headers, libobs, and LADSPA SD
 
 ## LADSPA filter
 
-Add **HyperDSP LADSPA** to an audio source. Select a trusted native LADSPA shared library and enter its exact plugin label (for example, `/usr/lib/ladspa/amp.so` and `amp_stereo`). The filter generates numeric and toggle controls from port metadata. Mono effects use independent instances per OBS audio channel; stereo effects require a stereo OBS layout. Only equal-input/output mono or stereo effects declaring hard-real-time capability are accepted. Unsupported configurations, missing libraries and invalid labels bypass audio.
+Add **HyperDSP LADSPA** to an audio source. Search the effect catalog by name, label or maker, narrow by category, and choose an effect from the native OBS properties. Switching catalog effects clears the previous effect's port values so the new effect starts at its own defaults. Manual trusted library path and exact label (for example, `/usr/lib/ladspa/amp.so` and `amp_stereo`) remain available. The filter generates numeric and toggle controls from port metadata. Mono effects use independent instances per OBS audio channel; stereo effects require a stereo OBS layout. Only equal-input/output mono or stereo effects declaring hard-real-time capability are accepted. Unsupported configurations, missing libraries and invalid labels bypass audio.
 
-Use `analyseplugin /path/to/plugin.so` to see available labels. Only load trusted plugins: this backend executes native code in the OBS process, not a sandbox. The initial host does not provide a library browser, latency compensation, sidechains, control-output meters or custom plugin interfaces. The audio test uses the real LADSPA SDK amplifier when installed; without it the LADSPA integration test is not registered.
+Use `analyseplugin /path/to/plugin.so` to see available labels. Only load trusted plugins: this backend executes native code in the OBS process, not a sandbox. The initial host does not provide preset import/export, latency compensation, sidechains, control-output meters or custom plugin interfaces. Categories are inferred from descriptor names/labels, not authoritative plugin metadata.
+
+### Refresh the catalog
+
+After building, run:
+
+```sh
+python3 tools/scan-ladspa.py --probe build/hyperdsp-ladspa-probe
+```
+
+The scanner checks standard system LADSPA directories (or explicitly supplied libraries/directories), starts a separate process per library with a three-second timeout, and atomically writes the user catalog to `~/.config/obs-studio/plugin_config/hyperdsp/ladspa-catalog.json` (respecting XDG_CONFIG_HOME). Reopen filter properties after scanning. Catalog reads do not execute plugin code; selecting a native plugin does. Process separation is crash isolation, not a security sandbox: scan only trusted libraries. A descriptor in the catalog is an eligibility result, not proof that its audio processing works.
+
+The install target includes both scanner files under `tools/`; the installed Python script locates its sibling probe by default. The catalog is local user data, not a shipped list of absolute paths. The audio test uses the real LADSPA SDK amplifier when installed; without it the LADSPA integration test is not registered.
 
 ## Migration status
 

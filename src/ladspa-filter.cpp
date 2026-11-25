@@ -1,4 +1,5 @@
 #include <obs-module.h>
+#include "ladspa-catalog.hpp"
 #include <ladspa.h>
 #include <dlfcn.h>
 #include <algorithm>
@@ -191,13 +192,68 @@ bool modified(obs_properties_t* props,obs_property_t*,obs_data_t* settings){
     }
     return true;
 }
+bool browse(obs_properties_t* props,obs_property_t*,obs_data_t* settings){
+    auto* list=obs_properties_get(props,"catalog_effect");
+    auto* catalog=static_cast<hyperdsp::Catalog*>(obs_properties_get_param(props));
+    if(!list||!catalog)return false;
+    auto query=hyperdsp::lower(obs_data_get_string(settings,"catalog_search"));
+    std::string category=obs_data_get_string(settings,"catalog_category");
+    std::string current=std::string(obs_data_get_string(settings,"library"))+"\t"+obs_data_get_string(settings,"label");
+    unsigned rate=0,channels=0;format(rate,channels);
+    obs_property_list_clear(list);
+    obs_property_list_add_string(list,"Choose effect…","");
+    for(auto& e:*catalog){
+        const bool selected=e.id()==current;
+        if(!selected && ((e.channels==2&&channels!=2)||
+           (!category.empty()&&category!=e.category)||
+           (!query.empty()&&hyperdsp::lower(e.name+" "+e.label+" "+e.maker).find(query)==std::string::npos)))continue;
+        auto title=e.name+" · "+(e.channels==1?"Mono":"Stereo")+(e.maker.empty()?"":" · "+e.maker);
+        obs_property_list_add_string(list,title.c_str(),e.id().c_str());
+    }
+    return true;
+}
+bool select_effect(obs_properties_t* props,obs_property_t*,obs_data_t* settings){
+    auto* catalog=static_cast<hyperdsp::Catalog*>(obs_properties_get_param(props));
+    std::string selected=obs_data_get_string(settings,"catalog_effect");
+    if(!catalog||selected.empty())return false;
+    for(auto& e:*catalog)if(e.id()==selected){
+        if(e.path==obs_data_get_string(settings,"library")&&e.label==obs_data_get_string(settings,"label"))return false;
+        for(unsigned p=0;p<max_ports;++p)obs_data_unset_user_value(settings,key(p).c_str());
+        obs_data_set_string(settings,"library",e.path.c_str());
+        obs_data_set_string(settings,"label",e.label.c_str());
+        return modified(props,nullptr,settings);
+    }
+    return false;
+}
+bool manual_modified(obs_properties_t* props,obs_property_t* prop,obs_data_t* settings){
+    std::string current=std::string(obs_data_get_string(settings,"library"))+"\t"+obs_data_get_string(settings,"label");
+    if(current!=obs_data_get_string(settings,"catalog_effect"))obs_data_set_string(settings,"catalog_effect","");
+    return modified(props,prop,settings);
+}
 obs_properties_t* properties(void* p){
     auto* props=obs_properties_create();
+    auto* catalog=new hyperdsp::Catalog(hyperdsp::read_catalog());
+    obs_properties_set_param(props,catalog,[](void* v){delete static_cast<hyperdsp::Catalog*>(v);});
+    auto* search=obs_properties_add_text(props,"catalog_search","Search effects",OBS_TEXT_DEFAULT);
+    auto* category=obs_properties_add_list(props,"catalog_category","Category",OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_STRING);
+    obs_property_list_add_string(category,"All effects","");
+    std::vector<std::string> categories;
+    for(auto& e:*catalog)if(std::find(categories.begin(),categories.end(),e.category)==categories.end())categories.push_back(e.category);
+    std::sort(categories.begin(),categories.end());
+    for(auto& c:categories)obs_property_list_add_string(category,c.c_str(),c.c_str());
+    auto* list=obs_properties_add_list(props,"catalog_effect","Effect",OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_STRING);
+    obs_property_set_long_description(list,catalog->empty()?"No catalog found. Run scan-ladspa.py, then reopen properties. Manual selection remains available.":"Only trusted native effects. Discovery is isolated; selected effects run in OBS.");
+    obs_property_set_modified_callback(search,browse);
+    obs_property_set_modified_callback(category,browse);
+    obs_property_set_modified_callback(list,select_effect);
+    auto* initial=obs_data_create();
+    browse(props,nullptr,initial);
+    obs_data_release(initial);
     auto* path=obs_properties_add_path(props,"library","Trusted LADSPA library",OBS_PATH_FILE,"Shared library (*.so)",nullptr);
     obs_property_set_long_description(path,"Native code executes inside OBS. Only choose plugins you trust.");
     auto* label=obs_properties_add_text(props,"label","Plugin label",OBS_TEXT_DEFAULT);
-    obs_property_set_modified_callback(path,modified);
-    obs_property_set_modified_callback(label,modified);
+    obs_property_set_modified_callback(path,manual_modified);
+    obs_property_set_modified_callback(label,manual_modified);
     if(p){auto* f=static_cast<Filter*>(p);std::lock_guard lock(f->mutex);
         if(f->active)add_controls(props,f->active->controls);}
     return props;

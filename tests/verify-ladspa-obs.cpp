@@ -11,6 +11,7 @@
 #include <chrono>
 #include <thread>
 #include <array>
+#include <string>
 
 struct Stats {
     std::atomic<uint64_t> samples{0};
@@ -83,6 +84,34 @@ int main(int argc,char**argv) {
     if(!source||!filter)return 6;
     auto* props=obs_source_properties(filter);
     bool prop_ok=props && obs_properties_get(props,"port_0");
+    auto* browser=props?obs_properties_get(props,"catalog_effect"):nullptr;
+    auto* search=props?obs_properties_get(props,"catalog_search"):nullptr;
+    auto* category=props?obs_properties_get(props,"catalog_category"):nullptr;
+    bool browser_ok=browser&&search&&category;
+    std::string browser_choice;
+    if(browser_ok){
+        obs_data_set_string(settings,"catalog_search","mono amplifier");
+        obs_property_modified(search,settings);
+        std::string choice;
+        for(size_t i=0;i<obs_property_list_item_count(browser);++i){
+            auto* value=obs_property_list_item_string(browser,i);
+            if(value&&std::string(value).ends_with("\tamp_mono"))choice=value;
+        }
+        browser_ok=!choice.empty()&&obs_property_list_item_count(browser)<=3;
+        if(browser_ok){
+            browser_choice=choice;
+            obs_data_set_string(settings,"catalog_effect",choice.c_str());
+            obs_property_modified(browser,settings);
+            browser_ok=std::string(obs_data_get_string(settings,"label"))=="amp_mono" &&
+                !obs_data_has_user_value(settings,"port_0") && obs_properties_get(props,"port_0");
+        }
+        obs_data_set_string(settings,"catalog_effect","");
+        obs_data_set_string(settings,"catalog_search","");
+        obs_data_set_string(settings,"library",argv[3]);
+        obs_data_set_string(settings,"label","amp_stereo");
+        obs_data_set_double(settings,"port_0",.25);
+        obs_source_update(filter,settings);
+    }
     if(props)obs_properties_destroy(props);
     obs_source_filter_add(source,filter);
     obs_set_output_source(1,source);
@@ -99,6 +128,25 @@ int main(int argc,char**argv) {
                                    std::sqrt(stats.sum_r.load()/std::max<uint64_t>(1,stats.samples.load()))};
     };
     auto quiet=measure();
+    if(browser_ok){
+        auto* live=obs_source_properties(filter);
+        auto* live_browser=obs_properties_get(live,"catalog_effect");
+        obs_data_set_string(settings,"catalog_effect",browser_choice.c_str());
+        obs_property_modified(live_browser,settings);
+        obs_source_update(filter,settings);
+        auto catalog_default=measure();
+        browser_ok=std::abs(catalog_default[0]-.4/std::sqrt(2.))<.005 &&
+                   std::abs(catalog_default[1]-.16/std::sqrt(2.))<.005;
+        obs_data_set_double(settings,"port_0",.25);
+        obs_source_update(filter,settings);
+        auto catalog_gain=measure();
+        browser_ok=browser_ok&&std::abs(catalog_gain[0]-quiet[0])<.005 &&
+                   std::abs(catalog_gain[1]-quiet[1])<.005;
+        obs_properties_destroy(live);
+        obs_data_set_string(settings,"catalog_effect","");
+        obs_data_set_string(settings,"label","amp_stereo");
+        obs_source_update(filter,settings);
+    }
     obs_data_set_double(settings,"port_0",.5);
     obs_source_update(filter,settings);
     auto louder=measure();
@@ -113,13 +161,13 @@ int main(int argc,char**argv) {
     obs_source_update(filter,settings);
     auto dry=measure();
     auto near=[](double a,double b){return std::abs(a-b)<.005;};
-    bool pass=prop_ok && near(quiet[0],.4/std::sqrt(2.)*.25) && near(quiet[1],.16/std::sqrt(2.)*.25)
+    bool pass=prop_ok && browser_ok && near(quiet[0],.4/std::sqrt(2.)*.25) && near(quiet[1],.16/std::sqrt(2.)*.25)
         && near(louder[0],quiet[0]*2) && near(louder[1],quiet[1]*2)
         && near(mono[0],.4/std::sqrt(2.)*.75) && near(mono[1],.16/std::sqrt(2.)*.75)
         && near(unknown[0],.4/std::sqrt(2.)) && near(unknown[1],.16/std::sqrt(2.))
         && near(dry[0],.4/std::sqrt(2.)) && near(dry[1],.16/std::sqrt(2.));
-    std::printf("LADSPA_OBS_ACTUAL quiet=%g,%g louder=%g,%g mono=%g,%g unknown=%g,%g dry=%g,%g controls=%d pass=%d\n",
-        quiet[0],quiet[1],louder[0],louder[1],mono[0],mono[1],unknown[0],unknown[1],dry[0],dry[1],prop_ok,pass);
+    std::printf("LADSPA_OBS_ACTUAL quiet=%g,%g louder=%g,%g mono=%g,%g unknown=%g,%g dry=%g,%g controls=%d browser=%d pass=%d\n",
+        quiet[0],quiet[1],louder[0],louder[1],mono[0],mono[1],unknown[0],unknown[1],dry[0],dry[1],prop_ok,browser_ok,pass);
     obs_set_output_source(1,nullptr);
     obs_source_dec_active(source);obs_source_filter_remove(source,filter);
     obs_source_release(filter);obs_source_release(source);obs_data_release(settings);obs_shutdown();

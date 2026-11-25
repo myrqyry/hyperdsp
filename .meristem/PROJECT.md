@@ -17,3 +17,5 @@ Use existing versioned OBS procedure interfaces and stable source UUIDs where ap
 Current evidence: HyperShader already has an optional Sight client (src/interop/sight_client.h); Sound publishes versioned procedures documented in docs/sound-signal-interop-v1.md. HyperDSP has no signal client yet. Mic DSP is ported and verified in isolation and alongside YAMNet-only Sound; full migration and install remain outstanding.
 
 First native host: LADSPA, verified against the installed SDK amplifier through actual libobs stereo capture, including stereo and duplicated mono instances, live parameter updates and dry failure. No neural dependencies. JSFX candidate YSFX was fetched for inspection only; Apache-2.0 vs inherited GPL-2.0 compatibility is unresolved.
+
+LADSPA discovery now uses an explicit separate-process probe per library, atomic user JSON catalog, and native OBS search/category/effect controls. Catalog selection and default reset verified through real libobs audio capture. Local scan: 273 eligible descriptors across 215 libraries, zero failed probes; this does not qualify every effect. No GUI visual smoke or live installation yet.
