@@ -57,6 +57,8 @@ Standalone conventional audio effects and hosting for OBS, with optional inputs 
 
 - Live applied-graph Monitor: channel-1 input/output waveforms, log-frequency FFT magnitude, peak dBFS and base/effective macro readouts, demand-leased bounded audio snapshots; actual libobs and widget verification.
 
+- Isolated draft Preview with worker-rendered native test tone, waveform/spectrum, peak/RMS and finite-impulse magnitude response for stationary gain/filter graphs. Shared strict graph parser, live settings untouched; external nodes rejected before loading.
+
 ## Next layers
 
 - Unified discoverable effect library: favorites, native/installed external/community definitions, backend compatibility, descriptions, safe explicit acquisition and reusable presets. Reset/import/export and a compact native frequency-response view.

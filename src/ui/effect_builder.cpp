@@ -1,6 +1,10 @@
 #include "effect_builder.hpp"
 #include "effect-metadata.hpp"
 #include "framework/dsp/monitor_spectrum.hpp"
+#include "framework/dsp/graph_preview.hpp"
+#include <future>
+#include <chrono>
+#include <QStackedWidget>
 #include <QPaintEvent>
 #include <QShowEvent>
 #include <QHideEvent>
@@ -191,6 +195,113 @@ public:
 protected:
     void showEvent(QShowEvent* event)override{QWidget::showEvent(event);poll();timer_.start();}
     void hideEvent(QHideEvent* event)override{timer_.stop();reset();QWidget::hideEvent(event);}
+};
+class ResponsePlot final:public QWidget {
+    std::vector<PreviewPoint> points_;
+public:
+    explicit ResponsePlot(QWidget* parent):QWidget(parent){setMinimumHeight(170);}
+    void setResponse(const std::vector<PreviewPoint>& points){points_=points;update();}
+protected:
+    void paintEvent(QPaintEvent*)override{
+        QPainter p(this);p.setRenderHint(QPainter::Antialiasing);GraphColors c(palette());
+        p.fillRect(rect(),c.base);p.setPen(c.text);
+        QRectF area(45,23,width()-54,height()-46);
+        p.drawText(QRectF(4,2,width()-8,18),Qt::AlignLeft,"Measured magnitude · dB");
+        if(points_.empty()||area.width()<20||area.height()<20)return;
+        double lo=-60,hi=12;
+        for(auto v:points_){lo=std::min(lo,std::max(-120.,v.db));hi=std::max(hi,v.db);}
+        lo=std::floor(lo/12)*12;hi=std::ceil(hi/12)*12;
+        double step=(hi-lo)>108?24:12;
+        auto x=[&](double hz){return area.left()+area.width()*std::log(hz/points_.front().hz)/std::log(points_.back().hz/points_.front().hz);};
+        auto y=[&](double db){return area.top()+area.height()*(hi-std::clamp(db,lo,hi))/(hi-lo);};
+        for(double db=std::ceil(lo/step)*step;db<=hi;db+=step){
+            p.setPen(QPen(blend(c.base,c.text,.20),db==0?1.5:1));p.drawLine(QPointF(area.left(),y(db)),QPointF(area.right(),y(db)));
+            p.setPen(c.text);p.drawText(QRectF(0,y(db)-8,40,16),Qt::AlignRight|Qt::AlignVCenter,QString::number(db));
+        }
+        for(double hz:{20.,100.,1000.,10000.})if(hz>=points_.front().hz&&hz<=points_.back().hz){
+            double xx=x(hz);p.setPen(QPen(blend(c.base,c.text,.20),1));p.drawLine(QPointF(xx,area.top()),QPointF(xx,area.bottom()));
+            p.setPen(c.text);p.drawText(QRectF(xx-20,area.bottom()+1,40,16),Qt::AlignHCenter,hz>=1000?QString::number(hz/1000)+"k":QString::number(hz));
+        }
+        QPainterPath path;bool first=true;
+        for(auto v:points_){QPointF pt(x(v.hz),y(v.db));if(first){path.moveTo(pt);first=false;}else path.lineTo(pt);}
+        p.save();p.setClipRect(area.adjusted(-1,-1,1,1));p.setPen(QPen(c.accent,2));p.drawPath(path);p.restore();
+    }
+};
+class PreviewPanel final:public QWidget {
+    std::function<QByteArray()> draft_;
+    QByteArray captured_;
+    std::future<GraphPreview> future_;
+    GraphPreview result_;
+    QTimer timer_;
+    QPushButton* run_;
+    QComboBox* mode_;
+    QDoubleSpinBox *hz_,*level_;
+    QLabel *status_,*detail_;
+    QStackedWidget* plots_;
+    ResponsePlot* response_;
+    MonitorPlot* tone_;
+    bool completed_=false;
+    unsigned rate_=0,channels_=0;
+    double frequency_=0,level_db_=0;
+    bool matches()const{
+        obs_audio_info ai{};
+        return draft_()==captured_&&hz_->value()==frequency_&&level_->value()==level_db_&&
+            obs_get_audio_info(&ai)&&ai.samples_per_sec==rate_&&get_audio_channels(ai.speakers)==channels_;
+    }
+    void clearPlots(){response_->setResponse({});tone_->clear();detail_->clear();}
+    void poll(){
+        if(future_.valid()){
+            if(future_.wait_for(std::chrono::seconds(0))!=std::future_status::ready)return;
+            try{result_=future_.get();}catch(const std::exception& e){result_={};result_.error=e.what();}
+            run_->setEnabled(true);completed_=true;
+            if(!matches()){clearPlots();status_->setText("Draft or signal changed — run Preview again.");return;}
+            if(!result_.ok){clearPlots();status_->setText("Error: "+qs(result_.error));return;}
+            response_->setResponse(result_.response);tone_->clear();tone_->setFrame(result_.frame);
+            mode_->clear();if(result_.linear)mode_->addItem("Response",0);mode_->addItem("Test tone",1);
+            mode_->setCurrentIndex(0);
+            status_->setText(result_.linear?"Response · isolated draft":"Tone · nonlinear or time-varying graph");
+            QString detail=QString("Ch 1 RMS: %1 → %2 dBFS · peak %3 dBFS · %4 samples known latency")
+                .arg(result_.input_rms_db,0,'f',1).arg(result_.output_rms_db,0,'f',1).arg(result_.output_peak_db,0,'f',1).arg(result_.latency);
+            if(result_.tail_warning)detail+=" · IR tail may be truncated";
+            if(result_.external_routes)detail+=" · external modulation held at zero";
+            detail_->setText(detail);return;
+        }
+        if(completed_&&!matches()){clearPlots();completed_=false;status_->setText("Draft or signal changed — run Preview again.");}
+    }
+    void run(){
+        if(future_.valid())return;
+        obs_audio_info ai{};
+        if(!obs_get_audio_info(&ai)){clearPlots();completed_=false;status_->setText("Error: OBS audio format unavailable");return;}
+        rate_=ai.samples_per_sec;channels_=get_audio_channels(ai.speakers);
+        captured_=draft_();frequency_=hz_->value();level_db_=level_->value();completed_=false;
+        clearPlots();run_->setEnabled(false);status_->setText("Rendering isolated draft…");
+        try{
+            future_=std::async(std::launch::async,[raw=captured_.toStdString(),rate=rate_,channels=channels_,hz=frequency_,level=level_db_]{
+                return preview_graph(raw,rate,channels,hz,level);
+            });
+        }catch(const std::exception& e){run_->setEnabled(true);status_->setText("Error: "+QString::fromUtf8(e.what()));}
+    }
+public:
+    explicit PreviewPanel(std::function<QByteArray()> draft,QWidget* parent=nullptr):QWidget(parent),draft_(std::move(draft)){
+        auto* layout=new QVBoxLayout(this);layout->setContentsMargins(3,3,3,3);layout->setSpacing(4);
+        auto* row=new QHBoxLayout;
+        hz_=new QDoubleSpinBox;hz_->setObjectName("previewFrequency");hz_->setRange(20,20000);hz_->setValue(1000);hz_->setSuffix(" Hz");hz_->setDecimals(1);hz_->setToolTip("Synthetic test-tone frequency");
+        level_=new QDoubleSpinBox;level_->setObjectName("previewLevel");level_->setRange(-60,0);level_->setValue(-12);level_->setSuffix(" dBFS");level_->setDecimals(1);level_->setToolTip("Synthetic sine peak amplitude");
+        run_=button("Preview","runPreview",this);row->addWidget(hz_,1);row->addWidget(level_,1);row->addWidget(run_);layout->addLayout(row);
+        auto* view=new QHBoxLayout;mode_=new QComboBox;mode_->setObjectName("previewMode");mode_->addItem("Test tone",1);
+        status_=new QLabel("Preview uses draft defaults; no live audio changes.");status_->setObjectName("previewStatus");status_->setTextFormat(Qt::PlainText);status_->setWordWrap(true);
+        view->addWidget(mode_);view->addWidget(status_,1);layout->addLayout(view);
+        plots_=new QStackedWidget;response_=new ResponsePlot(this);tone_=new MonitorPlot(this);
+        plots_->addWidget(response_);plots_->addWidget(tone_);plots_->setCurrentIndex(1);layout->addWidget(plots_,1);
+        detail_=new QLabel;detail_->setTextFormat(Qt::PlainText);detail_->setWordWrap(true);layout->addWidget(detail_);
+        auto* hint=new QLabel("Synthetic 0.5 s tone · draft defaults · native only · silent preview (no playback)");hint->setWordWrap(true);layout->addWidget(hint);
+        connect(mode_,&QComboBox::currentIndexChanged,this,[this]{if(mode_->currentIndex()>=0)plots_->setCurrentIndex(mode_->currentData().toInt());});
+        connect(run_,&QPushButton::clicked,this,[this]{run();});
+        timer_.setInterval(50);connect(&timer_,&QTimer::timeout,this,[this]{poll();});
+    }
+protected:
+    void showEvent(QShowEvent* e)override{QWidget::showEvent(e);poll();timer_.start();}
+    void hideEvent(QHideEvent* e)override{timer_.stop();QWidget::hideEvent(e);}
 };
 // Scene item identities are UI-only; the DSP graph still uses schema-1 indices.
 constexpr int input_id=-1,output_id=-2;
@@ -427,6 +538,7 @@ EffectBuilder::EffectBuilder(QWidget* parent):QWidget(parent),draft_(empty()){
         calldata_free(&d);obs_source_release(source);return ready;
     });
     tabs->addTab(monitor,"Monitor");
+    tabs->addTab(new PreviewPanel([this]{return QJsonDocument(draft_).toJson(QJsonDocument::Compact);}),"Preview");
     connect(target_,&QComboBox::currentIndexChanged,monitor,[monitor]{monitor->reset();if(monitor->isVisible())monitor->poll();});
 
     connect(tabs,&QTabWidget::currentChanged,this,[this](int index){if(index==3)refreshRoutes();});

@@ -336,6 +336,31 @@ int main(int argc,char** argv){
                 tabs->setCurrentIndex(3);
             }
             std::printf("BUILDER_MONITOR_PASS=%d\n",monitored);ok=ok&&monitored;
+            auto* preview=builder.findChild<QPushButton*>("runPreview");
+            auto* previewStatus=builder.findChild<QLabel*>("previewStatus");
+            auto* previewMode=builder.findChild<QComboBox*>("previewMode");
+            bool previewed=preview&&previewStatus&&previewMode;
+            if(previewed){
+                auto* data=obs_source_get_settings(filter);auto accepted=std::string(obs_data_get_string(data,"graph_json"));obs_data_release(data);
+                auto low=QJsonDocument::fromJson(R"({"schema":1,"nodes":[{"effect":"native:hyperdsp_native_filter:1","params":{"frequency":1000},"inputs":[{"source":-1,"weight":1}]}],"output":0})").object();
+                builder.setDraft(low);tabs->setCurrentIndex(5);QTest::mouseClick(preview,Qt::LeftButton);
+                auto complete=[&](){for(int i=0;i<100&&!preview->isEnabled();++i)QTest::qWait(20);return preview->isEnabled();};
+                previewed=complete()&&previewStatus->text().contains("Response")&&previewMode->currentData().toInt()==0&&previewMode->count()==2;
+                if(qEnvironmentVariableIsSet("HYPERDSP_BUILDER_SCREENSHOT"))
+                    builder.grab().save(qEnvironmentVariable("HYPERDSP_BUILDER_SCREENSHOT")+".preview.png");
+                previewMode->setCurrentIndex(1);QTest::qWait(40);
+                if(qEnvironmentVariableIsSet("HYPERDSP_BUILDER_SCREENSHOT"))
+                    builder.grab().save(qEnvironmentVariable("HYPERDSP_BUILDER_SCREENSHOT")+".tone.png");
+                auto clip=QJsonDocument::fromJson(R"({"schema":1,"nodes":[{"effect":"native:hyperdsp_color_filter:3","params":{"drive":24},"inputs":[{"source":-1,"weight":1}]}],"output":0})").object();
+                builder.setDraft(clip);QTest::qWait(180);
+                previewed=previewed&&previewStatus->text().contains("changed");
+                QTest::mouseClick(preview,Qt::LeftButton);
+                previewed=complete()&&previewed&&previewMode->count()==1&&previewStatus->text().contains("Tone");
+                auto invalid=clip;invalid["output"]=9;builder.setDraft(invalid);QTest::mouseClick(preview,Qt::LeftButton);
+                previewed=complete()&&previewed&&previewStatus->text().startsWith("Error");
+                data=obs_source_get_settings(filter);previewed=previewed&&accepted==obs_data_get_string(data,"graph_json");obs_data_release(data);
+            }
+            std::printf("BUILDER_PREVIEW_PASS=%d\n",previewed);ok=ok&&previewed;
             QTest::qWait(80);
             if(qEnvironmentVariableIsSet("HYPERDSP_BUILDER_SCREENSHOT"))builder.grab().save(qEnvironmentVariable("HYPERDSP_BUILDER_SCREENSHOT"));
         }
