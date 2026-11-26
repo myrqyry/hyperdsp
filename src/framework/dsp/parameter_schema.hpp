@@ -6,6 +6,7 @@
 #include "time_effect.hpp"
 #include "space.hpp"
 #include "formant.hpp"
+#include "multiband.hpp"
 #include <map>
 #include <string>
 #include <string_view>
@@ -59,6 +60,25 @@ inline constexpr FloatParameter<DynamicsSettings> dynamics_parameters[]={
     {"input_db","Input gain",-24,24,.1," dB",&DynamicsSettings::input_db},
     {"mix","Wet / dry",0,1,.01,"",&DynamicsSettings::wet},
     {"output_db","Output gain",-24,24,.1," dB",&DynamicsSettings::output_db}};
+inline constexpr FloatParameter<MultibandSettings> multiband_crossovers[]={
+    {"low_hz","Low crossover",60,500,1," Hz",&MultibandSettings::low_hz},
+    {"high_hz","High crossover",1000,8000,1," Hz",&MultibandSettings::high_hz}};
+inline constexpr FloatParameter<MultibandSettings> multiband_parameters[]={
+    {"low_threshold","Low threshold",-80,0,.1," dBFS",nullptr,&MultibandSettings::threshold,0},
+    {"low_ratio","Low ratio",1,20,.1,":1",nullptr,&MultibandSettings::ratio,0},
+    {"low_makeup","Low makeup",-24,24,.1," dB",nullptr,&MultibandSettings::makeup,0},
+    {"mid_threshold","Mid threshold",-80,0,.1," dBFS",nullptr,&MultibandSettings::threshold,1},
+    {"mid_ratio","Mid ratio",1,20,.1,":1",nullptr,&MultibandSettings::ratio,1},
+    {"mid_makeup","Mid makeup",-24,24,.1," dB",nullptr,&MultibandSettings::makeup,1},
+    {"high_threshold","High threshold",-80,0,.1," dBFS",nullptr,&MultibandSettings::threshold,2},
+    {"high_ratio","High ratio",1,20,.1,":1",nullptr,&MultibandSettings::ratio,2},
+    {"high_makeup","High makeup",-24,24,.1," dB",nullptr,&MultibandSettings::makeup,2},
+    {"attack","Attack",.1,200,.1," ms",&MultibandSettings::attack},
+    {"release","Release",5,2000,1," ms",&MultibandSettings::release},
+    {"knee","Soft knee",0,24,.1," dB",&MultibandSettings::knee},
+    {"input_db","Input gain",-24,24,.1," dB",&MultibandSettings::input_db},
+    {"mix","Wet / dry",0,1,.01,"",&MultibandSettings::wet},
+    {"output_db","Output gain",-24,24,.1," dB",&MultibandSettings::output_db}};
 inline constexpr FloatParameter<TimeSettings> time_parameters[]={
     {"delay_ms","Delay / center",.001,2000,.001," ms",&TimeSettings::delay_ms},
     {"feedback","Feedback",-.95,.95,.01,"",&TimeSettings::feedback},

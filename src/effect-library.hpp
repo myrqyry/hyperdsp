@@ -30,6 +30,7 @@ inline constexpr NativeMode dynamics_modes[]={
     {2,"Downward expander","Dynamics","Attenuate quieter signals"},
     {3,"Noise gate","Dynamics","Gate with hold and hysteresis"},
     {4,"Sample-peak limiter","Dynamics","Immediate wet-branch sample attenuation; not true peak"}};
+inline constexpr NativeMode multiband_modes[]={{0,"Bypass","Utility","Unprocessed audio"},{1,"Three-band compressor","Dynamics","Phase-matched crossover with independent band compression"}};
 inline constexpr NativeMode color_modes[]={
     {0,"Bypass","Utility","Unprocessed audio"},
     {1,"Tanh saturation","Distortion","Gradual nonlinear saturation"},
@@ -63,6 +64,7 @@ inline constexpr NativeFamily native_families[]={
     {"hyperdsp_mic_filter","HyperDSP Microphone DSP","mic_type",mic_modes},
     {"hyperdsp_native_filter","HyperDSP Filter","mode",filter_modes},
     {"hyperdsp_dynamics_filter","HyperDSP Dynamics","mode",dynamics_modes},
+    {"hyperdsp_multiband_filter","HyperDSP Multiband","mode",multiband_modes},
     {"hyperdsp_color_filter","HyperDSP Color","mode",color_modes},
     {"hyperdsp_time_filter","HyperDSP Time","mode",time_modes},
     {"hyperdsp_space_filter","HyperDSP Space","mode",space_modes},

@@ -58,7 +58,7 @@ int main(){
     s.nodes[1].params["oversample"]=3;ok=ok&&!g.replace(s,48000,2,error);
     // Each remaining native mode must compile and actually process audio.
     const std::pair<const char*,int> families[]={{"mic_modeler_filter",6},{"hyperdsp_native_filter",9},
-        {"hyperdsp_dynamics_filter",4},{"hyperdsp_time_filter",5},{"hyperdsp_space_filter",2},{"hyperdsp_formant_filter",2}};
+        {"hyperdsp_dynamics_filter",4},{"hyperdsp_multiband_filter",1},{"hyperdsp_time_filter",5},{"hyperdsp_space_filter",2},{"hyperdsp_formant_filter",2}};
     for(auto [family,count]:families)for(int mode=1;mode<=count;++mode){
         GraphSpec native{{{std::string("native:")+family+":"+std::to_string(mode),{},{{-1,1}}}},0};
         GraphRuntime a,b;
