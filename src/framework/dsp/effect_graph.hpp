@@ -50,7 +50,7 @@ class PreparedGraph {
         }
     };
     struct Node {
-        std::variant<GainNode,std::unique_ptr<Color>,std::unique_ptr<Spectral>,std::unique_ptr<NativeFilter>,std::unique_ptr<Dynamics>,std::unique_ptr<Multiband>,std::unique_ptr<Stereo>,std::unique_ptr<Transient>,std::unique_ptr<TimeEffect>,std::unique_ptr<Space>,std::unique_ptr<Formant>,std::unique_ptr<MicNode>,std::unique_ptr<LadspaEngine>> engine{GainNode{}};
+        std::variant<GainNode,std::unique_ptr<Color>,std::unique_ptr<Spectral>,std::unique_ptr<NativeFilter>,std::unique_ptr<Dynamics>,std::unique_ptr<Multiband>,std::unique_ptr<Stereo>,std::unique_ptr<Transient>,std::unique_ptr<BandTransient>,std::unique_ptr<TimeEffect>,std::unique_ptr<Space>,std::unique_ptr<Formant>,std::unique_ptr<MicNode>,std::unique_ptr<LadspaEngine>> engine{GainNode{}};
         std::function<void(const Values&)> apply;
         std::vector<Edge> inputs;
         std::vector<float> audio;
@@ -220,12 +220,20 @@ public:
                 auto engine=std::make_unique<Dynamics>();
                 if(!bind_native(n,engine.get(),settings,dynamics_parameters,mappings[i],g->values_))return fail("Invalid continuous parameter binding: "+spec.effect);
                 engine->reset(rate,settings);n.engine=std::move(engine);
-            }else if(mode(spec.effect,"native:hyperdsp_transient_filter:",m,1)){
-                TransientSettings settings;
-                for(auto& [k,v]:spec.params)if(!assign_parameter(settings,transient_parameters,k,v))return fail("Invalid Transient parameter: "+k);
-                auto engine=std::make_unique<Transient>();
-                if(!bind_native(n,engine.get(),settings,transient_parameters,mappings[i],g->values_))return fail("Invalid Transient binding");
-                engine->reset(rate,settings);n.engine=std::move(engine);
+            }else if(mode(spec.effect,"native:hyperdsp_transient_filter:",m,2)){
+                if(m==1){
+                    TransientSettings settings;
+                    for(auto& [k,v]:spec.params)if(!assign_parameter(settings,transient_parameters,k,v))return fail("Invalid Transient parameter: "+k);
+                    auto engine=std::make_unique<Transient>();
+                    if(!bind_native(n,engine.get(),settings,transient_parameters,mappings[i],g->values_))return fail("Invalid Transient binding");
+                    engine->reset(rate,settings);n.engine=std::move(engine);
+                }else{
+                    BandTransientSettings settings;
+                    for(auto& [k,v]:spec.params)if(!assign_parameter(settings,band_transient_parameters,k,v)&&!assign_parameter(settings,band_transient_crossovers,k,v))return fail("Invalid multiband Transient parameter: "+k);
+                    auto engine=std::make_unique<BandTransient>();
+                    if(!bind_native(n,engine.get(),settings,band_transient_parameters,mappings[i],g->values_))return fail("Invalid multiband Transient binding (crossovers are fixed per graph)");
+                    engine->reset(rate,settings);n.engine=std::move(engine);
+                }
             }else if(mode(spec.effect,"native:hyperdsp_stereo_filter:",m,1)){
                 if(channels!=2)return fail("Stereo imaging requires exactly two channels");
                 StereoSettings settings;

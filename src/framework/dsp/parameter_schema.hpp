@@ -9,6 +9,7 @@
 #include "multiband.hpp"
 #include "stereo.hpp"
 #include "transient.hpp"
+#include "band_transient.hpp"
 #include <map>
 #include <string>
 #include <string_view>
@@ -70,6 +71,21 @@ inline constexpr FloatParameter<TransientSettings> transient_parameters[]={
     {"input_db","Input gain",-24,24,.1," dB",&TransientSettings::input_db},
     {"mix","Wet / dry",0,1,.01,"",&TransientSettings::wet},
     {"output_db","Output gain",-24,24,.1," dB",&TransientSettings::output_db}};
+inline constexpr FloatParameter<BandTransientSettings> band_transient_crossovers[]={
+    {"low_hz","Low crossover",60,500,1," Hz",&BandTransientSettings::low_hz},
+    {"high_hz","High crossover",1000,8000,1," Hz",&BandTransientSettings::high_hz}};
+inline constexpr FloatParameter<BandTransientSettings> band_transient_parameters[]={
+    {"low_attack_db","Low attack",-12,12,.1," dB",nullptr,&BandTransientSettings::attack_db,0},
+    {"low_sustain_db","Low sustain",-12,12,.1," dB",nullptr,&BandTransientSettings::sustain_db,0},
+    {"mid_attack_db","Mid attack",-12,12,.1," dB",nullptr,&BandTransientSettings::attack_db,1},
+    {"mid_sustain_db","Mid sustain",-12,12,.1," dB",nullptr,&BandTransientSettings::sustain_db,1},
+    {"high_attack_db","High attack",-12,12,.1," dB",nullptr,&BandTransientSettings::attack_db,2},
+    {"high_sustain_db","High sustain",-12,12,.1," dB",nullptr,&BandTransientSettings::sustain_db,2},
+    {"attack_ms","Attack contour",5,100,1," ms",&BandTransientSettings::attack_ms},
+    {"sustain_ms","Sustain contour",50,500,1," ms",&BandTransientSettings::sustain_ms},
+    {"input_db","Input gain",-24,24,.1," dB",&BandTransientSettings::input_db},
+    {"mix","Wet / dry",0,1,.01,"",&BandTransientSettings::wet},
+    {"output_db","Output gain",-24,24,.1," dB",&BandTransientSettings::output_db}};
 inline constexpr FloatParameter<StereoSettings> stereo_parameters[]={
     {"width","Stereo width",0,2,.01," ×",&StereoSettings::width},
     {"mid_db","Mid gain",-24,24,.1," dB",&StereoSettings::mid_db},

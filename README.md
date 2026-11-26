@@ -35,7 +35,7 @@ Drag node bodies to arrange the canvas, and drag an output port to an input port
 
 ## Effect graph runtime
 
-**HyperDSP Graph** is an initial executable serial/parallel effect graph filter. Its versioned JSON definition is editable in OBS filter properties; the graphical Effect Builder is available through the optional Qt dock. The graph supports all 41 native processing modes across eleven families, and a gain/weighted-sum utility. Scanned compatible LADSPA effects can also be used as graph nodes or standalone filters. External native code is trusted code, not sandboxed.
+**HyperDSP Graph** is an initial executable serial/parallel effect graph filter. Its versioned JSON definition is editable in OBS filter properties; the graphical Effect Builder is available through the optional Qt dock. The graph supports all 42 native processing modes across eleven families, and a gain/weighted-sum utility. Scanned compatible LADSPA effects can also be used as graph nodes or standalone filters. External native code is trusted code, not sandboxed.
 
 The graph has a single audio input (source index -1), up to 16 nodes and 32 weighted edges, and a selected output. It rejects cycles, disconnected nodes, unsupported effects, non-finite/out-of-range parameters and invalid connections. Parallel paths are aligned to the greatest fixed algorithmic latency at each merge, including Color oversampling and Spectral FFT buffering. Valid graphs are prepared off the audio callback and swapped in; an invalid edit retains the previous active graph; OBS saves its last accepted definition and base control values for recovery on reload. The callback processes bounded chunks with preallocated buffers. A valid replacement resets graph state, and an update collision can briefly bypass; there is no crossfade or scene-wide timestamp alignment.
 
@@ -94,7 +94,7 @@ Numerical and real libobs tests cover static curves, stereo linkage, soft knee, 
 
 ## Transient shaping
 
-**HyperDSP Transient** changes attack and decay contours independently with signed gain controls (−12 to +12 dB), adjustable contour times, input/output trim and wet/dry. Its linked-channel peak-envelope contrast detector preserves channel balance, responds immediately to onsets, and tends toward neutral on stationary input. The shared native graph node supports all seven continuous parameters as macro targets. No lookahead, fixed buffering latency or peak limiter. See [transient design and tests](docs/transient.md).
+**HyperDSP Transient** changes attack and decay contours independently with signed gain controls (−12 to +12 dB), adjustable contour times, input/output trim and wet/dry. Its linked-channel peak-envelope contrast detector preserves channel balance, responds immediately to onsets, and tends toward neutral on stationary input. Broadband mode retains its seven macro-bindable parameters. Three-band mode adds independent low, mid and high attack/sustain gains and adjustable crossovers, using the same phase-matched processing bank as Multiband compression. No lookahead, fixed buffering latency or peak limiter. See [transient design and tests](docs/transient.md).
 
 ## Stereo imaging
 
@@ -174,7 +174,7 @@ The adapter validates procedure version, buffer size, sequence, dimensions, kind
 
 ### Unified effect inventory
 
-The shared native mode registry drives all eleven native OBS filter selectors and lists 41 processing modes (excluding bypass). The `hyperdsp-effects` tool combines this registry with the local scanned LADSPA catalog, without opening any plugin or starting OBS:
+The shared native mode registry drives all eleven native OBS filter selectors and lists 42 processing modes (excluding bypass). The `hyperdsp-effects` tool combines this registry with the local scanned LADSPA catalog, without opening any plugin or starting OBS:
 
 ```sh
 build/hyperdsp-effects --search "pitch"

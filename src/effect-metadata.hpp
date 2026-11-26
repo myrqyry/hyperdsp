@@ -56,7 +56,11 @@ inline void graph_metadata(obs_data_t* item,const hyperdsp::EffectEntry& e,unsig
     }else if(e.source=="hyperdsp_dynamics_filter"){
         parameter_list(params,DynamicsSettings{},dynamics_parameters);
     }else if(e.source=="hyperdsp_transient_filter"){
-        parameter_list(params,TransientSettings{},transient_parameters);
+        if(e.mode==2){
+            BandTransientSettings settings;
+            for(auto& p:band_transient_crossovers)number_parameter(params,p.key,p.name,p.min,p.max,p.step,p.get(settings),p.unit,false);
+            parameter_list(params,settings,band_transient_parameters);
+        }else parameter_list(params,TransientSettings{},transient_parameters);
     }else if(e.source=="hyperdsp_stereo_filter"){
         parameter_list(params,StereoSettings{},stereo_parameters);
     }else if(e.source=="hyperdsp_multiband_filter"){

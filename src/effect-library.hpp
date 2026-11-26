@@ -30,7 +30,7 @@ inline constexpr NativeMode dynamics_modes[]={
     {2,"Downward expander","Dynamics","Attenuate quieter signals"},
     {3,"Noise gate","Dynamics","Gate with hold and hysteresis"},
     {4,"Sample-peak limiter","Dynamics","Immediate wet-branch sample attenuation; not true peak"}};
-inline constexpr NativeMode transient_modes[]={{0,"Bypass","Utility","Unprocessed audio"},{1,"Transient shaper","Dynamics","Independent onset and decay contour gain"}};
+inline constexpr NativeMode transient_modes[]={{0,"Bypass","Utility","Unprocessed audio"},{1,"Transient shaper","Dynamics","Independent onset and decay contour gain"},{2,"Three-band transient shaper","Dynamics","Independent low, mid and high onset and decay shaping"}};
 inline constexpr NativeMode stereo_modes[]={{0,"Bypass","Utility","Unprocessed audio"},{1,"Stereo imaging","Stereo","Mid/side gain, width and balance"}};
 inline constexpr NativeMode multiband_modes[]={{0,"Bypass","Utility","Unprocessed audio"},{1,"Three-band compressor","Dynamics","Phase-matched crossover with independent band compression"}};
 inline constexpr NativeMode color_modes[]={

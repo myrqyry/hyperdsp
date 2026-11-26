@@ -71,6 +71,8 @@ Standalone conventional audio effects and hosting for OBS, with optional inputs 
 
 - Linked-channel transient attack/decay shaping, independent signed gains and adjustable contour timing; shared standalone/graph engine and actual OBS audio verification.
 
+- Three-band transient mode with six independent contour gains, shared phase-matched crossover/processing bank, graph macros and native mode-aware properties.
+
 ## Next layers
 
 - Unified discoverable effect library: favorites, native/installed external/community definitions, backend compatibility, descriptions, safe explicit acquisition and reusable presets. Reset/import/export and a compact native frequency-response view.
