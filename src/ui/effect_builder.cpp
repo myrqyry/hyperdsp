@@ -1,4 +1,5 @@
 #include "effect_builder.hpp"
+#include "audition_panel.hpp"
 #include "effect-metadata.hpp"
 #include "framework/dsp/monitor_spectrum.hpp"
 #include "framework/dsp/graph_preview.hpp"
@@ -539,6 +540,7 @@ EffectBuilder::EffectBuilder(QWidget* parent):QWidget(parent),draft_(empty()){
     });
     tabs->addTab(monitor,"Monitor");
     tabs->addTab(new PreviewPanel([this]{return QJsonDocument(draft_).toJson(QJsonDocument::Compact);}),"Preview");
+    tabs->addTab(new AuditionPanel([this]{return QJsonDocument(draft_).toJson(QJsonDocument::Compact);}),"Audition");
     connect(target_,&QComboBox::currentIndexChanged,monitor,[monitor]{monitor->reset();if(monitor->isVisible())monitor->poll();});
 
     connect(tabs,&QTabWidget::currentChanged,this,[this](int index){if(index==3)refreshRoutes();});

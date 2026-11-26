@@ -18,6 +18,12 @@
 #include <QTabWidget>
 #include <QJsonObject>
 #include <QJsonDocument>
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QTemporaryFile>
+#include <QDir>
+#include <QDataStream>
+#include <QTimer>
 #include <obs-module.h>
 #include <cstdio>
 #include <util/platform.h>
@@ -32,6 +38,7 @@ static void* create(obs_data_t*,obs_source_t*){return reinterpret_cast<void*>(1)
 static void destroy(void*){}
 int main(int argc,char** argv){
     if(argc!=3)return 2;
+    QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
     QApplication app(argc,argv);
     if(!obs_startup("en-US",nullptr,nullptr))return 3;
     obs_audio_info ai{};ai.samples_per_sec=48000;ai.speakers=SPEAKERS_STEREO;
@@ -361,6 +368,85 @@ int main(int argc,char** argv){
                 data=obs_source_get_settings(filter);previewed=previewed&&accepted==obs_data_get_string(data,"graph_json");obs_data_release(data);
             }
             std::printf("BUILDER_PREVIEW_PASS=%d\n",previewed);ok=ok&&previewed;
+            auto* renderAudition=builder.findChild<QPushButton*>("renderAudition");
+            auto* dry=builder.findChild<QPushButton*>("playDry");
+            auto* wet=builder.findChild<QPushButton*>("playWet");
+            auto* stop=builder.findChild<QPushButton*>("stopAudition");
+            auto* signal=builder.findChild<QComboBox*>("auditionSignal");
+            auto* device=builder.findChild<QComboBox*>("auditionDevice");
+            auto* auditionStatus=builder.findChild<QLabel*>("auditionStatus");
+            bool auditioned=renderAudition&&dry&&wet&&stop&&signal&&device&&auditionStatus;
+            if(auditioned){
+                auto* data=obs_source_get_settings(filter);auto accepted=std::string(obs_data_get_string(data,"graph_json"));obs_data_release(data);
+                auto draft=QJsonDocument::fromJson(R"({"schema":1,"nodes":[{"effect":"gain","params":{"gain_db":-6},"inputs":[{"source":-1,"weight":1}]}],"output":0})").object();
+                builder.setDraft(draft);tabs->setCurrentIndex(6);signal->setCurrentIndex(1);
+                QTest::mouseClick(renderAudition,Qt::LeftButton);
+                for(int i=0;i<150&&!renderAudition->isEnabled();++i)QTest::qWait(20);
+                auditioned=auditionStatus->text().startsWith("Ready")&&!dry->isEnabled()&&!wet->isEnabled();
+                if(qEnvironmentVariableIsSet("HYPERDSP_AUDITION_TEST_SINK")){
+                    auto sink=qEnvironmentVariable("HYPERDSP_AUDITION_TEST_SINK");
+                    for(int i=0;i<100&&device->findData(sink)<0;++i)QTest::qWait(20);
+                    int index=device->findData(sink);auditioned=auditioned&&index>=0;
+                    if(index>=0){
+                        device->setCurrentIndex(index);auditioned=auditioned&&dry->isEnabled()&&wet->isEnabled();
+                        QTest::mouseClick(dry,Qt::LeftButton);
+                        for(int i=0;i<300&&!auditionStatus->text().startsWith("Finished");++i)QTest::qWait(20);
+                        std::printf("AUDITION_DRY %s\n",qPrintable(auditionStatus->text()));std::fflush(stdout);
+                        auditioned=auditioned&&auditionStatus->text().startsWith("Finished");
+                        QTest::mouseClick(wet,Qt::LeftButton);QTest::qWait(120);
+                        tabs->setCurrentIndex(5);QTest::qWait(200);tabs->setCurrentIndex(6);
+                        auditioned=auditioned&&!stop->isEnabled();
+                    }
+                }
+                QTemporaryFile wave(QDir::tempPath()+"/hyperdsp-XXXXXX.wav");
+                bool made=wave.open();
+                if(made){
+                    QDataStream wav(&wave);wav.setByteOrder(QDataStream::LittleEndian);
+                    wav.writeRawData("RIFF",4);wav<<quint32(36+1600);wav.writeRawData("WAVEfmt ",8);
+                    wav<<quint32(16)<<quint16(1)<<quint16(1)<<quint32(8000)<<quint32(16000)<<quint16(2)<<quint16(16);
+                    wav.writeRawData("data",4);wav<<quint32(1600);
+                    for(int j=0;j<800;++j)wav<<qint16(8192*std::sin(2*std::numbers::pi*j/16));
+                    wave.flush();wave.close();
+                    signal->setCurrentIndex(3);
+                    auto* choose=builder.findChild<QPushButton*>("chooseAuditionFile");
+                    auditioned=auditioned&&choose;
+                    if(choose){
+                        QTimer select;select.setInterval(100);
+                        int tries=0;
+                        QObject::connect(&select,&QTimer::timeout,&builder,[&]{
+                            ++tries;
+                            for(auto* widget:QApplication::topLevelWidgets()){
+                                auto* dialog=qobject_cast<QFileDialog*>(widget);
+                                if(!dialog||!dialog->isVisible())continue;
+                                if(tries>30){dialog->reject();return;}
+                                dialog->setDirectory(QFileInfo(wave.fileName()).absolutePath());
+                                dialog->selectFile(QFileInfo(wave.fileName()).fileName());
+                                if(auto* edit=dialog->findChild<QLineEdit*>("fileNameEdit"))edit->setText(wave.fileName());
+                                QMetaObject::invokeMethod(dialog,"accept",Qt::QueuedConnection);
+                                return;
+                            }
+                        });
+                        select.start();
+                        QTest::mouseClick(choose,Qt::LeftButton);
+                        select.stop();
+                        QTest::mouseClick(renderAudition,Qt::LeftButton);
+                        for(int i=0;i<150&&!renderAudition->isEnabled();++i)QTest::qWait(20);
+                        std::printf("AUDITION_FILE %s\n",qPrintable(auditionStatus->text()));std::fflush(stdout);
+                        auditioned=auditioned&&auditionStatus->text().startsWith("Ready")&&auditionStatus->text().contains("8 kHz")&&auditionStatus->text().contains("1 ch");
+                        if(qEnvironmentVariableIsSet("HYPERDSP_AUDITION_TEST_SINK")&&wet->isEnabled()){
+                            QTest::mouseClick(wet,Qt::LeftButton);
+                            for(int i=0;i<150&&!auditionStatus->text().startsWith("Finished");++i)QTest::qWait(20);
+                            auditioned=auditioned&&auditionStatus->text().startsWith("Finished");
+                        }
+                    }
+                }else auditioned=false;
+                if(qEnvironmentVariableIsSet("HYPERDSP_BUILDER_SCREENSHOT"))
+                    builder.grab().save(qEnvironmentVariable("HYPERDSP_BUILDER_SCREENSHOT")+".audition.png");
+                draft["output"]=9;builder.setDraft(draft);QTest::qWait(150);
+                auditioned=auditioned&&!dry->isEnabled()&&!wet->isEnabled()&&auditionStatus->text().contains("changed");
+                data=obs_source_get_settings(filter);auditioned=auditioned&&accepted==obs_data_get_string(data,"graph_json");obs_data_release(data);
+            }
+            std::printf("BUILDER_AUDITION_PASS=%d\n",auditioned);ok=ok&&auditioned;
             QTest::qWait(80);
             if(qEnvironmentVariableIsSet("HYPERDSP_BUILDER_SCREENSHOT"))builder.grab().save(qEnvironmentVariable("HYPERDSP_BUILDER_SCREENSHOT"));
         }
