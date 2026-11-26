@@ -32,9 +32,9 @@ int main(int argc,char** argv){
     };
     std::array<float,480> l{},r{};
     uint64_t start=os_gettime_ns();unsigned samples=0;
-    auto stream=[&](unsigned blocks){
+    auto stream=[&](unsigned blocks,double amplitude=.4){
         for(unsigned k=0;k<blocks;++k){
-            for(unsigned i=0;i<480;++i){l[i]=.4f*std::sin(2*std::numbers::pi*(samples+i)*1500/48000);r[i]=-l[i];}
+            for(unsigned i=0;i<480;++i){l[i]=amplitude*std::sin(2*std::numbers::pi*(samples+i)*1500/48000);r[i]=-l[i];}
             obs_source_audio audio{};audio.data[0]=(uint8_t*)l.data();audio.data[1]=(uint8_t*)r.data();
             audio.frames=480;audio.speakers=SPEAKERS_STEREO;audio.format=AUDIO_FORMAT_FLOAT_PLANAR;audio.samples_per_sec=48000;
             audio.timestamp=start+uint64_t(samples)*1000000000ULL/48000;obs_source_output_audio(source,&audio);samples+=480;
@@ -86,6 +86,15 @@ int main(int argc,char** argv){
     ok=ok&&n[2].peak[1]>n[2].peak[0]&&n[2].peak[1]>n[2].peak[2];
     ok=ok&&std::abs(dynamic_eq_frozen_db(n[0],48000,1500)+9)<.02&&std::abs(dynamic_eq_frozen_db(n[0],48000,20))<.01;
     std::printf("NODE_TELEMETRY eq=%g compressor=%g mid=%g peaks=%g/%g/%g\n",n[0].gain_db[0],n[1].gain_db[0],n[2].gain_db[1],n[2].peak[0],n[2].peak[1],n[2].peak[2]);
+    obs_data_set_string(settings,"graph_json",R"({"schema":1,"nodes":[{"effect":"native:hyperdsp_transient_filter:1","params":{"attack_db":12,"sustain_db":-12},"inputs":[{"source":-1,"weight":1}]},{"effect":"native:hyperdsp_transient_filter:2","params":{"mid_attack_db":12,"mid_sustain_db":-12},"inputs":[{"source":-1,"weight":1}]},{"effect":"gain","inputs":[{"source":0,"weight":0.5},{"source":1,"weight":0.5}]}],"output":2})");
+    obs_source_update(filter,settings);ok=ok&&!readNodes();
+    stream(3);ok=ok&&readNodes()&&telemetry.node_count==3&&n[0].kind==TelemetryKind::Transient&&n[1].kind==TelemetryKind::BandTransient;
+    bool onset=n[0].peak[0]>.15&&n[0].gain_db[0]>1&&n[1].peak[1]>.15&&n[1].gain_db[1]>1;
+    std::printf("GRAPH_ONSET values=%g/%g %g/%g kinds=%u/%u count=%u\n",n[0].peak[0],n[0].gain_db[0],n[1].peak[1],n[1].gain_db[1],unsigned(n[0].kind),unsigned(n[1].kind),telemetry.node_count);
+    stream(50);stream(6,.04);ok=ok&&readNodes();
+    bool decay=n[0].peak[0]<-.3&&n[0].gain_db[0]<-3&&n[1].peak[1]<-.3&&n[1].gain_db[1]<-3;
+    ok=ok&&onset&&decay&&n[1].gain_db[0]==0&&n[1].gain_db[2]==0&&n[1].high_hz==2500;
+    std::printf("GRAPH_CONTOUR onset=%d decay=%d broadband=%g/%g mid=%g/%g\n",onset,decay,n[0].peak[0],n[0].gain_db[0],n[1].peak[1],n[1].gain_db[1]);
     telemetry.size=0;ok=ok&&!readNodes();telemetry.size=sizeof(telemetry);
     obs_data_set_string(settings,"graph_json",R"({"schema":1,"nodes":[],"output":-1})");obs_source_update(filter,settings);
     ok=ok&&!readNodes();stream(5);ok=ok&&readNodes()&&telemetry.node_count==0;

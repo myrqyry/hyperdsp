@@ -339,11 +339,29 @@ protected:
                 QString("%1 Hz · Q %2").arg(shown.frequency,0,'f',0).arg(shown.q,0,'f',2));
             return;
         }
-        unsigned count=node_.kind==TelemetryKind::Multiband?3:1;
+        bool contour=node_.kind==TelemetryKind::Transient||node_.kind==TelemetryKind::BandTransient;
+        unsigned count=node_.kind==TelemetryKind::Multiband||node_.kind==TelemetryKind::BandTransient?3:1;
         const double w=width()-16.,rowHeight=(height()-8.)/count;
         if(w<60||rowHeight<35)return;
         for(unsigned b=0;b<count;++b){
             double top=4+b*rowHeight;
+            if(contour){
+                double contrast=std::clamp(double(node_.peak[b]),-1.,1.),gain=node_.gain_db[b];
+                QString name=count==1?"Broadband":QStringList{"Low","Mid","High"}[b];
+                p.setPen(c.text);p.drawText(QRectF(8,top,w,18),Qt::AlignLeft,name);
+                p.drawText(QRectF(8,top,w,18),Qt::AlignRight,QString("%1 %2%  |  %3 dB")
+                    .arg(contrast>.005?"Attack":contrast<-.005?"Decay":"Neutral").arg(std::abs(contrast)*100,0,'f',0).arg(gain,0,'f',1));
+                double h=std::min(10.,(rowHeight-20)/2);
+                auto meter=[&](double y,double value){
+                    QRectF track(8,y,w,h);p.setPen(Qt::NoPen);p.setBrush(grid);p.drawRoundedRect(track,3,3);
+                    double amount=w*.5*std::clamp(value,-1.,1.);
+                    p.setBrush(value<0?c.edge:c.accent);
+                    p.drawRoundedRect(QRectF(track.center().x()+std::min(0.,amount),y,std::abs(amount),h),3,3);
+                    p.setPen(c.text);p.drawLine(QPointF(track.center().x(),y),QPointF(track.center().x(),y+h));
+                };
+                meter(top+20,contrast);meter(top+22+h,gain/12);
+                continue;
+            }
             double peak=20*std::log10(std::max(node_.peak[b],1e-6f)),gain=node_.gain_db[b];
             QString name=count==1?"Broadband":QStringList{"Low","Mid","High"}[b];
             p.setPen(c.text);p.drawText(QRectF(8,top,w,18),Qt::AlignLeft,name);
@@ -427,12 +445,22 @@ protected:
         }
     }
 };
-class MultibandEditor final:public QWidget {
+class BandEditorBase:public QWidget {
+public:
+    using QWidget::QWidget;
+    virtual void read(obs_source_t*)=0;
+    virtual void cancel()=0;
+};
+template<class Settings> class BandEditor final:public BandEditorBase {
+    static constexpr bool transient=std::is_same_v<Settings,BandTransientSettings>;
+    static constexpr unsigned stride=transient?2:3;
+    static constexpr auto& crossovers(){if constexpr(transient)return band_transient_crossovers;else return multiband_crossovers;}
+    static constexpr auto& parameters(){if constexpr(transient)return band_transient_parameters;else return multiband_parameters;}
     CrossoverEditor* crossover_;
     QComboBox* band_;
     std::array<QDoubleSpinBox*,2> bounds_{};
-    std::array<QDoubleSpinBox*,3> controls_{};
-    MultibandSettings config_{};
+    std::array<QDoubleSpinBox*,stride> controls_{};
+    Settings config_{};
     unsigned rate_=48000,selectedBand_=0;
     std::function<void(const char*,double)> change_;
     std::function<void()> refresh_;
@@ -443,21 +471,21 @@ class MultibandEditor final:public QWidget {
     }
     void sync(){
         {QSignalBlocker block(bounds_[1]);bounds_[1]->setMaximum(std::min(8000.,rate_*.45));}
-        for(unsigned i=0;i<2;++i)syncSpin(bounds_[i],multiband_crossovers[i].get(config_));
+        for(unsigned i=0;i<2;++i)syncSpin(bounds_[i],crossovers()[i].get(config_));
         unsigned b=selectedBand_;
-        for(unsigned i=0;i<3;++i)syncSpin(controls_[i],multiband_parameters[b*3+i].get(config_));
+        for(unsigned i=0;i<stride;++i)syncSpin(controls_[i],parameters()[b*stride+i].get(config_));
         crossover_->setConfig(config_.low_hz,config_.high_hz,rate_);crossover_->setBand(b);
     }
-    void change(const FloatParameter<MultibandSettings>& p,double value){
+    void change(const FloatParameter<Settings>& p,double value){
         p.get(config_)=float(value);change_(p.key,value);sync();
     }
 public:
-    MultibandEditor(std::function<void(const char*,double)> change,std::function<void()> refresh,QWidget* parent)
-        :QWidget(parent),change_(std::move(change)),refresh_(std::move(refresh)){
+    BandEditor(std::function<void(const char*,double)> change,std::function<void()> refresh,QWidget* parent)
+        :BandEditorBase(parent),change_(std::move(change)),refresh_(std::move(refresh)){
         auto* layout=new QVBoxLayout(this);layout->setContentsMargins(0,0,0,0);layout->setSpacing(4);
         layout->setSizeConstraint(QLayout::SetMinimumSize);setSizePolicy(QSizePolicy::Preferred,QSizePolicy::Minimum);
         band_=new QComboBox;band_->setObjectName("bandSelect");band_->addItems({"Low band","Mid band","High band"});
-        crossover_=new CrossoverEditor([this](unsigned i,double hz){this->change(multiband_crossovers[i],hz);refresh_();},
+        crossover_=new CrossoverEditor([this](unsigned i,double hz){this->change(crossovers()[i],hz);refresh_();},
             [this](unsigned b){band_->setCurrentIndex(b);},this);
         layout->addWidget(crossover_);
         auto* edges=new QHBoxLayout;auto* values=new QHBoxLayout;
@@ -476,24 +504,29 @@ public:
             });
             return spin;
         };
-        bounds_[0]=control(edges,"Low crossover","bandLowHz",multiband_crossovers[0],0);
-        bounds_[1]=control(edges,"High crossover","bandHighHz",multiband_crossovers[1],0);
+        bounds_[0]=control(edges,"Low crossover","bandLowHz",crossovers()[0],0);
+        bounds_[1]=control(edges,"High crossover","bandHighHz",crossovers()[1],0);
         layout->addLayout(edges);layout->addWidget(band_);
-        controls_[0]=control(values,"Threshold","bandThreshold",multiband_parameters[0],1);
-        controls_[1]=control(values,"Ratio","bandRatio",multiband_parameters[1],1);
-        controls_[2]=control(values,"Makeup","bandMakeup",multiband_parameters[2],1);
+        if constexpr(transient){
+            controls_[0]=control(values,"Attack","bandAttack",parameters()[0],1);
+            controls_[1]=control(values,"Sustain","bandSustain",parameters()[1],1);
+        }else{
+            controls_[0]=control(values,"Threshold","bandThreshold",parameters()[0],1);
+            controls_[1]=control(values,"Ratio","bandRatio",parameters()[1],1);
+            controls_[2]=control(values,"Makeup","bandMakeup",parameters()[2],1);
+        }
         layout->addLayout(values);
         auto* hint=new QLabel("Drag to preview · release to apply");hint->setToolTip("Applying a new crossover resets its DSP state.");layout->addWidget(hint);
         for(unsigned i=0;i<2;++i)connect(bounds_[i],&QDoubleSpinBox::valueChanged,this,[this,i](double value){
-            this->change(multiband_crossovers[i],value);
+            this->change(crossovers()[i],value);
         });
-        for(unsigned i=0;i<3;++i)connect(controls_[i],&QDoubleSpinBox::valueChanged,this,[this,i](double value){
-            this->change(multiband_parameters[selectedBand_*3+i],value);
+        for(unsigned i=0;i<stride;++i)connect(controls_[i],&QDoubleSpinBox::valueChanged,this,[this,i](double value){
+            this->change(parameters()[selectedBand_*stride+i],value);
         });
         connect(band_,&QComboBox::currentIndexChanged,this,[this](int index){
             if(index<0||index>2)return;
             // Commit unfinished text against the OLD band, never the new one.
-            for(auto* spin:controls_){
+            for(QDoubleSpinBox* spin:controls_){
                 spin->interpretText();
                 if(auto* line=spin->findChild<QLineEdit*>())line->setModified(false);
             }
@@ -501,14 +534,81 @@ public:
         });
         sync();
     }
-    void read(obs_source_t* source){
+    void read(obs_source_t* source)override{
         obs_audio_info ai{};if(obs_get_audio_info(&ai)&&ai.samples_per_sec>=8000&&ai.samples_per_sec<=192000)rate_=ai.samples_per_sec;
         auto* settings=obs_source_get_settings(source);
-        for(auto& p:multiband_crossovers)p.get(config_)=float(MixSettings::bounded(obs_data_get_double(settings,p.key),p.min,std::min(p.max,rate_*.45),p.get(MultibandSettings{})));
-        for(auto& p:multiband_parameters)if(p.array)p.get(config_)=float(MixSettings::bounded(obs_data_get_double(settings,p.key),p.min,p.max,p.get(MultibandSettings{})));
+        if constexpr(transient){
+            bool active=obs_data_get_int(settings,"mode")==2;
+            if(!active){
+                if(!isHidden()){
+                    cancel();
+                    for(QDoubleSpinBox* spin:controls_)if(auto* line=spin->findChild<QLineEdit*>())line->setModified(false);
+                    hide();
+                }
+                obs_data_release(settings);return;
+            }
+            if(isHidden())show();
+        }
+        for(auto& p:crossovers())p.get(config_)=float(MixSettings::bounded(obs_data_get_double(settings,p.key),p.min,std::min(p.max,rate_*.45),p.get(Settings{})));
+        for(auto& p:parameters())if(p.array)p.get(config_)=float(MixSettings::bounded(obs_data_get_double(settings,p.key),p.min,p.max,p.get(Settings{})));
         obs_data_release(settings);sync();
     }
-    void cancel(){crossover_->cancelDrag();}
+    void cancel()override{crossover_->cancelDrag();}
+};
+// The broadband gain row and shared timing row use the same parameter
+// descriptors as native OBS properties. Never write an inactive mode's gains.
+class TransientControls final:public QWidget {
+    QWidget *gains_,*timing_;
+    std::array<QDoubleSpinBox*,4> spins_{};
+    std::function<void(const char*,double)> change_;
+    std::function<void()> refresh_;
+    void setRowVisible(QWidget* row,bool visible){
+        if(row->isHidden()==!visible)return;
+        if(!visible){
+            for(auto* spin:row->findChildren<QDoubleSpinBox*>()){
+                if(auto* line=spin->findChild<QLineEdit*>())line->setModified(false);
+            }
+        }
+        row->setVisible(visible);
+    }
+public:
+    TransientControls(std::function<void(const char*,double)> change,std::function<void()> refresh,QWidget* parent)
+        :QWidget(parent),change_(std::move(change)),refresh_(std::move(refresh)){
+        auto* layout=new QVBoxLayout(this);layout->setContentsMargins(0,0,0,0);layout->setSpacing(4);
+        layout->setSizeConstraint(QLayout::SetMinimumSize);setSizePolicy(QSizePolicy::Preferred,QSizePolicy::Minimum);
+        auto row=[&](unsigned start){
+            auto* widget=new QWidget(this);auto* horizontal=new QHBoxLayout(widget);horizontal->setContentsMargins(0,0,0,0);horizontal->setSpacing(6);
+            const char* labels[]={"Attack gain","Sustain gain","Attack contour","Sustain contour"};
+            const char* ids[]={"transientAttack","transientSustain","transientAttackTime","transientSustainTime"};
+            for(unsigned i=start;i<start+2;++i){
+                auto& p=transient_parameters[i];
+                auto* cell=new QWidget(widget);auto* column=new QVBoxLayout(cell);column->setContentsMargins(0,0,0,0);column->setSpacing(2);
+                auto* label=new QLabel(labels[i]);label->setMinimumHeight(label->sizeHint().height());
+                auto* spin=new QDoubleSpinBox;spins_[i]=spin;spin->setObjectName(ids[i]);spin->setRange(p.min,p.max);
+                spin->setDecimals(i<2?1:0);spin->setSingleStep(p.step);spin->setSuffix(p.unit);spin->setKeyboardTracking(false);spin->setMinimumHeight(spin->sizeHint().height());
+                label->setBuddy(spin);column->addWidget(label);column->addWidget(spin);cell->setMinimumHeight(column->minimumSize().height());horizontal->addWidget(cell,1);
+                connect(spin,&QDoubleSpinBox::valueChanged,this,[this,i](double value){change_(transient_parameters[i].key,value);});
+                connect(spin,&QDoubleSpinBox::editingFinished,this,[this,spin]{
+                    if(auto* line=spin->findChild<QLineEdit*>())line->setModified(false);
+                    refresh_();
+                });
+            }
+            layout->addWidget(widget);return widget;
+        };
+        gains_=row(0);timing_=row(2);
+    }
+    void read(obs_source_t* source){
+        auto* settings=obs_source_get_settings(source);
+        auto mode=obs_data_get_int(settings,"mode");
+        setRowVisible(gains_,mode==1);setRowVisible(timing_,mode==1||mode==2);
+        for(unsigned i=0;i<spins_.size();++i){
+            auto* spin=spins_[i];auto* line=spin->findChild<QLineEdit*>();
+            if(spin->hasFocus()&&line&&line->isModified())continue;
+            auto& p=transient_parameters[i];QSignalBlocker blocker(spin);
+            spin->setValue(MixSettings::bounded(obs_data_get_double(settings,p.key),p.min,p.max,p.get(TransientSettings{})));
+        }
+        obs_data_release(settings);setVisible(mode==1||mode==2);
+    }
 };
 class FilterAnalysisDialog final:public QDialog {
     obs_weak_source_t* weak_;
@@ -517,7 +617,8 @@ class FilterAnalysisDialog final:public QDialog {
     QLabel* detail_;
     QTimer timer_,editTimer_;
     QDoubleSpinBox *frequency_=nullptr,*range_=nullptr,*q_=nullptr;
-    MultibandEditor* bands_=nullptr;
+    BandEditorBase* bands_=nullptr;
+    TransientControls* transientControls_=nullptr;
     unsigned pending_=0,configRate_=48000;
     bool refreshPending_=false;
     NodeTelemetry config_{};
@@ -584,12 +685,13 @@ class FilterAnalysisDialog final:public QDialog {
         bool ready=proc_handler_call(obs_source_get_proc_handler(source),"hyperdsp_filter_telemetry_v1",&d)&&calldata_bool(&d,"available");
         calldata_free(&d);
         setWindowTitle(QString("HyperDSP · %1").arg(QString::fromUtf8(obs_source_get_name(source))));
-        readConfig(source);if(bands_)bands_->read(source);obs_source_release(source);
+        readConfig(source);if(bands_)bands_->read(source);if(transientControls_)transientControls_->read(source);obs_source_release(source);
         if(!ready||frame.rate<8000||frame.rate>192000||frame.node.kind==TelemetryKind::None){clear();return;}
         const auto& n=frame.node;plot_->setNode(n,frame.rate);
         status_->setText(QString("Live · %1 kHz").arg(frame.rate/1000.,0,'g',4));
         if(n.kind==TelemetryKind::DynamicEq)detail_->setText(QString("Dynamic gain %1 dB · detector %2 dBFS · frozen wet response, excludes mix/trim")
             .arg(n.gain_db[0],0,'f',1).arg(20*std::log10(std::max(n.peak[0],1e-6f)),0,'f',1));
+        else if(n.kind==TelemetryKind::Transient||n.kind==TelemetryKind::BandTransient)detail_->setText("Upper: decay ← contour → attack\nLower: cut ← wet gain → boost");
         else if(n.kind==TelemetryKind::Multiband)detail_->setText(QString("Crossovers %1 / %2 Hz\nDetector / reduction · before makeup and mix")
             .arg(n.low_hz,0,'f',0).arg(n.high_hz,0,'f',0));
         else detail_->setText(QString("Smoothed gain %1 dB · detector (upper) / gain reduction (lower), before makeup and mix").arg(n.gain_db[0],0,'f',1));
@@ -625,21 +727,41 @@ public:
                 flush(true);syncControls();
             });
         }
-        if(std::string_view(obs_source_get_id(source))=="hyperdsp_multiband_filter"){
-            bands_=new MultibandEditor([this](const char* key,double value){
+        auto filterId=std::string_view(obs_source_get_id(source));
+        if(filterId=="hyperdsp_multiband_filter"||filterId=="hyperdsp_transient_filter"){
+            bool transient=filterId=="hyperdsp_transient_filter";
+            auto change=[this,transient](const char* key,double value){
                 auto* source=obs_weak_source_get_source(weak_);if(!source)return;
                 auto* settings=obs_source_get_settings(source);
-                if(std::abs(obs_data_get_double(settings,key)-value)>1e-5){
+                if((!transient||obs_data_get_int(settings,"mode")==2)&&std::abs(obs_data_get_double(settings,key)-value)>1e-5){
                     auto* patch=obs_data_create();obs_data_set_double(patch,key,value);
                     obs_source_update(source,patch);obs_data_release(patch);refreshPending_=true;
                 }
                 obs_data_release(settings);obs_source_release(source);
-            },[this]{flush(true);},this);
-            bands_->read(source);layout->addWidget(bands_);
+            };
+            auto refresh=[this]{flush(true);};
+            if(transient)bands_=new BandEditor<BandTransientSettings>(change,refresh,this);
+            else bands_=new BandEditor<MultibandSettings>(change,refresh,this);
+            layout->addWidget(bands_);bands_->read(source);
+            if(transient){
+                auto changeContour=[this](const char* key,double value){
+                    auto* source=obs_weak_source_get_source(weak_);if(!source)return;
+                    auto* settings=obs_source_get_settings(source);
+                    const auto mode=obs_data_get_int(settings,"mode");
+                    const bool shared=std::string_view(key)=="attack_ms"||std::string_view(key)=="sustain_ms";
+                    if((mode==1||(mode==2&&shared))&&std::abs(obs_data_get_double(settings,key)-value)>1e-5){
+                        auto* patch=obs_data_create();obs_data_set_double(patch,key,value);
+                        obs_source_update(source,patch);obs_data_release(patch);refreshPending_=true;
+                    }
+                    obs_data_release(settings);obs_source_release(source);
+                };
+                transientControls_=new TransientControls(changeContour,refresh,this);
+                layout->addWidget(transientControls_);transientControls_->read(source);
+            }
         }
         detail_=new QLabel;detail_->setObjectName("filterAnalysisDetail");detail_->setTextFormat(Qt::PlainText);detail_->setWordWrap(!bands_);layout->addWidget(detail_);
         auto* closeButton=new QPushButton("Close",this);closeButton->setAutoDefault(false);closeButton->setDefault(false);connect(closeButton,&QPushButton::clicked,this,&QDialog::close);layout->addWidget(closeButton);
-        clear();resize(480,bands_?530:frequency_?390:320);
+        clear();resize(480,transientControls_?580:bands_?530:frequency_?390:320);
         timer_.setInterval(50);connect(&timer_,&QTimer::timeout,this,[this]{poll();});
     }
     ~FilterAnalysisDialog()override{timer_.stop();editTimer_.stop();obs_weak_source_release(weak_);}
@@ -679,7 +801,7 @@ public:
             legend->setText(i==0?"Input — dashed   Output — solid · applied graph, not draft":
                 i==1?"Input — larger dots   Output — smaller dots · applied graph":
                 i==2?"Positive = greater output magnitude · negative = less · applied graph":
-                "Detector (upper bar) / gain reduction (lower bar) · before makeup and mix");
+                "Engine detector / contour and gain · before mix");
         });
         connect(node_,&QComboBox::currentIndexChanged,this,[this]{updateDetail();});
         controls_=new QLabel;controls_->setTextFormat(Qt::PlainText);controls_->setWordWrap(true);layout->addWidget(controls_);
@@ -692,6 +814,8 @@ public:
             const auto& n=frame_.nodes[i];QString name;
             if(n.kind==TelemetryKind::DynamicEq)name="Dynamic EQ";
             else if(n.kind==TelemetryKind::Multiband)name="Multiband compressor";
+            else if(n.kind==TelemetryKind::Transient)name="Transient shaper";
+            else if(n.kind==TelemetryKind::BandTransient)name="Three-band transient";
             else if(n.kind==TelemetryKind::Dynamics)name=QStringList{"Dynamics","Compressor","Expander","Gate","Limiter"}.value(n.mode,"Dynamics");
             else continue;
             labels<<QString("%1 · %2").arg(i+1).arg(name);ids<<int(i);
@@ -705,10 +829,11 @@ public:
     void updateDetail(){
         if(!valid_||view_->currentIndex()==0){detail_->clear();return;}
         if(view_->currentIndex()==3){
-            if(node_->currentIndex()<0){nodePlot_->clear();detail_->setText("No supported dynamics nodes in applied graph.");return;}
+            if(node_->currentIndex()<0){nodePlot_->clear();detail_->setText("No supported telemetry nodes in applied graph.");return;}
             const auto& n=frame_.nodes[node_->currentData().toUInt()];
             nodePlot_->setNode(n,frame_.audio.signal.rate);
             if(n.kind==TelemetryKind::DynamicEq)detail_->setText(QString("Dynamic gain %1 dB · detector %2 dBFS · frozen wet response, excludes mix/trim").arg(n.gain_db[0],0,'f',1).arg(20*std::log10(std::max(n.peak[0],1e-6f)),0,'f',1));
+            else if(n.kind==TelemetryKind::Transient||n.kind==TelemetryKind::BandTransient)detail_->setText("Upper: decay ← contour → attack · lower: cut ← wet gain → boost");
             else if(n.kind==TelemetryKind::Multiband)detail_->setText(QString("Crossovers %1 / %2 Hz · detector peaks and gain reduction").arg(n.low_hz,0,'f',0).arg(n.high_hz,0,'f',0));
             else detail_->setText(QString("Smoothed gain %1 dB · detector peak and gain reduction").arg(n.gain_db[0],0,'f',1));
             return;

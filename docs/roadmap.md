@@ -85,6 +85,8 @@ Standalone conventional audio effects and hosting for OBS, with optional inputs 
 
 - Standalone multiband compressor crossover region editor, deferred topology changes, independent band threshold/ratio/makeup and native setting synchronization.
 
+- Standalone broadband/three-band transient editor, shared crossover controls, live signed contour/gain telemetry in standalone and graph, shared contour timing.
+
 ## Next layers
 
 - Unified discoverable effect library: favorites, native/installed external/community definitions, backend compatibility, descriptions, safe explicit acquisition and reusable presets. Reset/import/export and a compact native frequency-response view.

@@ -5,8 +5,10 @@
 #include <cmath>
 #include <numbers>
 namespace hyperdsp {
-enum class TelemetryKind : uint32_t {None,Dynamics,DynamicEq,Multiband};
-// End-of-host-block detector and smoothed gain state, before makeup or mix.
+enum class TelemetryKind : uint32_t {None,Dynamics,DynamicEq,Multiband,Transient,BandTransient};
+// End-of-host-block detector and gain state, before makeup or mix.
+// For Transient/BandTransient only, peak holds signed normalized contour
+// contrast [-1,1] (positive onset, negative decay), not amplitude.
 struct NodeTelemetry {
     TelemetryKind kind=TelemetryKind::None;
     uint32_t mode=0;
@@ -30,6 +32,15 @@ template<class Engine> NodeTelemetry dynamic_eq_telemetry(const Engine& engine){
 template<class Engine> NodeTelemetry multiband_telemetry(const Engine& engine){
     NodeTelemetry n;n.kind=TelemetryKind::Multiband;n.low_hz=engine.low_frequency();n.high_hz=engine.high_frequency();
     for(unsigned b=0;b<3;++b){n.peak[b]=engine.detector_peak(b);n.gain_db[b]=-engine.gain_reduction_db(b);}
+    return n;
+}
+template<class Engine> NodeTelemetry transient_telemetry(const Engine& engine){
+    NodeTelemetry n;n.kind=TelemetryKind::Transient;n.peak[0]=engine.contour();
+    n.gain_db[0]=engine.contour_gain_db();return n;
+}
+template<class Engine> NodeTelemetry band_transient_telemetry(const Engine& engine){
+    NodeTelemetry n;n.kind=TelemetryKind::BandTransient;n.low_hz=engine.low_frequency();n.high_hz=engine.high_frequency();
+    for(unsigned b=0;b<3;++b){n.peak[b]=engine.contour(b);n.gain_db[b]=engine.contour_gain_db(b);}
     return n;
 }
 using NodeTelemetryArray=std::array<NodeTelemetry,16>;

@@ -61,10 +61,28 @@ int main(){
     float* p[]={l.data(),r.data()};a.process(p,2,l.size());
     for(unsigned i=0;i<x.size();++i){float* q[]={&x[i],&y[i]};b.process(q,2,1);}
     for(unsigned i=0;i<x.size();++i)ok=ok&&std::isfinite(l[i])&&std::abs(l[i]-x[i])<1e-6&&std::abs(r[i]-y[i])<1e-6&&std::abs(r[i]+.5f*l[i])<1e-6;
+    {
+        Transient t;TransientSettings settings;settings.attack_db=12;settings.sustain_db=-12;t.reset(48000,settings);
+        std::array<float,4800> signal{};signal.fill(.2f);
+        float* p[]={signal.data()};t.process(p,1,1);
+        auto onset=transient_telemetry(t);
+        ok=ok&&onset.kind==TelemetryKind::Transient&&onset.peak[0]>.99&&onset.gain_db[0]>11.8;
+        ok=ok&&std::abs(signal[0]-.2f*std::pow(10.f,onset.gain_db[0]/20))<1e-6;
+        t.process(p,1,signal.size());signal.fill(.04f);t.process(p,1,2400);
+        auto tail=transient_telemetry(t);
+        ok=ok&&tail.peak[0]<-.4&&tail.gain_db[0]<-4;
+        t.reset(48000,settings);auto reset=transient_telemetry(t);ok=ok&&reset.peak[0]==0&&reset.gain_db[0]==0;
+        std::printf("TRANSIENT_TELEMETRY onset=%g/%g decay=%g/%g\n",onset.peak[0],onset.gain_db[0],tail.peak[0],tail.gain_db[0]);
+    }
     GraphSpec spec{{{"native:hyperdsp_transient_filter:2",{},{{-1,1}}}},0};
     spec.controls.push_back({"bass","Bass attack",1,{{0,"low_attack_db",0,12}}});
     std::string error;auto graph=PreparedGraph::prepare(spec,48000,2,error);
     ok=ok&&graph&&graph->latency()==0;
+    if(graph){
+        std::array<float,256> v{};for(unsigned i=0;i<v.size();++i)v[i]=.4f*std::sin(i*2*std::numbers::pi*80/48000);
+        float* p[]={v.data(),nullptr};graph->process(p,2,v.size());
+        NodeTelemetryArray nodes{};ok=ok&&graph->telemetry(nodes)==1&&nodes[0].kind==TelemetryKind::BandTransient&&nodes[0].gain_db[0]>1&&nodes[0].gain_db[1]==0&&nodes[0].gain_db[2]==0&&nodes[0].low_hz==250;
+    }
     spec.controls[0].bindings[0]={0,"low_hz",100,300};
     ok=ok&&!PreparedGraph::prepare(spec,48000,2,error);
     std::printf("BAND_TRANSIENT_PASS=%d low_onset=%g low_tail=%g high_onset=%g\n",ok,onset,tail,highRatio);return ok?0:1;

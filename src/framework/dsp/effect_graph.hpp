@@ -366,6 +366,10 @@ public:
                     n=dynamic_eq_telemetry(*engine);
                 }else if constexpr(std::is_same_v<T,std::unique_ptr<Multiband>>){
                     n=multiband_telemetry(*engine);
+                }else if constexpr(std::is_same_v<T,std::unique_ptr<Transient>>){
+                    n=transient_telemetry(*engine);
+                }else if constexpr(std::is_same_v<T,std::unique_ptr<BandTransient>>){
+                    n=band_transient_telemetry(*engine);
                 }
             },nodes_[i].engine);
         }

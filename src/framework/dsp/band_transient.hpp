@@ -30,6 +30,10 @@ class BandTransient {
 public:
     void reset(unsigned rate,BandTransientSettings s){rate_=std::clamp(rate,8000u,192000u);configure(s,true);}
     void set(BandTransientSettings s){configure(s,false);}
+    float contour(unsigned band)const{return bands_[band].contour();}
+    float contour_gain_db(unsigned band)const{return bands_[band].contour_gain_db();}
+    float low_frequency()const{return low_;}
+    float high_frequency()const{return high_;}
     void process(float*const* p,unsigned channels,unsigned frames){
         if(enabled_)bank_.process(p,channels,frames,bands_);
     }

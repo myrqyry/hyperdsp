@@ -13,6 +13,7 @@ class Transient {
     unsigned rate_=48000,ramp_=480;
     bool enabled_=true;
     float fast_=0,slow_=0,fast_release_=0,slow_attack_=0,slow_release_=0;
+    float last_contrast_=0,last_gain_db_=0;
     LinearRamp attack_,sustain_;
     MixModulator mixer_;
     static float coefficient(unsigned rate,float ms){return float(std::exp(-1000./(rate*double(ms))));}
@@ -28,12 +29,14 @@ class Transient {
         slow_attack_=coefficient(rate_,attack);
         slow_release_=coefficient(rate_,sustain);
         auto mix=MixSettings::from(s.wet,s.input_db,s.output_db);
-        if(reset){fast_=slow_=0;mixer_.reset(rate_,mix);}
+        if(reset){fast_=slow_=last_contrast_=last_gain_db_=0;mixer_.reset(rate_,mix);}
         else mixer_.set(mix,{});
     }
 public:
     void reset(unsigned rate,TransientSettings s){rate_=std::clamp(rate,8000u,192000u);ramp_=std::max(1u,rate_/100);configure(s,true);}
     void set(TransientSettings s){configure(s,false);}
+    float contour()const{return last_contrast_;}
+    float contour_gain_db()const{return last_gain_db_;}
     void process(float*const* p,unsigned channels,unsigned frames){
         if(!enabled_||!p||!channels||channels>8)return;
         for(unsigned j=0;j<frames;++j){
@@ -49,6 +52,7 @@ public:
             // Absolute floor avoids applying full gain to near-silence.
             float contrast=(fast_-slow_)/std::max({fast_,slow_,.001f});
             float db=attack*std::max(contrast,0.f)+sustain*std::max(-contrast,0.f);
+            if(j+1==frames){last_contrast_=contrast;last_gain_db_=db;}
             float gain=std::pow(10.f,db/20);
             for(unsigned c=0;c<channels;++c)if(p[c]){
                 float dry=p[c][j];

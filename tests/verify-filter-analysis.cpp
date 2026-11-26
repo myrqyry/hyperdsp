@@ -28,9 +28,11 @@ int main(int argc,char** argv){
     obs_register_source(&fixture);
     auto* source=obs_source_create("analysis_test_input","Analysis test",nullptr,nullptr);
     bool ok=true;unsigned samples=0;auto start=os_gettime_ns();
-    for(auto id:{"hyperdsp_dynamic_eq_filter","hyperdsp_dynamics_filter","hyperdsp_multiband_filter"}){
+    for(auto id:{"hyperdsp_dynamic_eq_filter","hyperdsp_dynamics_filter","hyperdsp_multiband_filter","hyperdsp_transient_filter"}){
         bool prior=ok;ok=true;auto* s=obs_data_create();obs_data_set_double(s,"frequency",1500);obs_data_set_double(s,"threshold",-30);obs_data_set_double(s,"range_db",-9);
         obs_data_set_double(s,"mid_threshold",-30);obs_data_set_double(s,"mid_ratio",4);obs_data_set_double(s,"low_ratio",1);obs_data_set_double(s,"high_ratio",1);
+        bool transient=std::string_view(id)=="hyperdsp_transient_filter";
+        if(transient){obs_data_set_int(s,"mode",2);obs_data_set_double(s,"mid_attack_db",12);obs_data_set_double(s,"mid_sustain_db",-12);}
         auto* f=obs_source_create_private(id,"Test filter",s);obs_source_filter_add(source,f);
         FilterTelemetryFrame frame{};
         auto read=[&](){
@@ -45,10 +47,10 @@ int main(int argc,char** argv){
         QPointer<QDialog> dialog;int count=0;
         for(auto* w:QApplication::topLevelWidgets())if(w->objectName()=="hyperdspFilterAnalysis"){dialog=qobject_cast<QDialog*>(w);++count;}
         ok=ok&&count==1&&dialog&&dialog->isVisible();
-        auto stream=[&](){
+        auto stream=[&](unsigned blocks=100,double amplitude=.4){
             std::array<float,480> l{},r{};
-            for(unsigned k=0;k<100;++k){
-                for(unsigned j=0;j<480;++j){l[j]=.4f*std::sin(2*std::numbers::pi*1500*(samples+j)/48000);r[j]=-l[j];}
+            for(unsigned k=0;k<blocks;++k){
+                for(unsigned j=0;j<480;++j){l[j]=amplitude*std::sin(2*std::numbers::pi*1500*(samples+j)/48000);r[j]=-l[j];}
                 obs_source_audio a{};a.data[0]=(uint8_t*)l.data();a.data[1]=(uint8_t*)r.data();a.frames=480;
                 a.speakers=SPEAKERS_STEREO;a.format=AUDIO_FORMAT_FLOAT_PLANAR;a.samples_per_sec=48000;
                 a.timestamp=start+uint64_t(samples)*1000000000ULL/48000;obs_source_output_audio(source,&a);samples+=480;
@@ -153,6 +155,52 @@ int main(int argc,char** argv){
                     high->setValue(2500);threshold->setValue(-18);makeup->setValue(0);band->setCurrentIndex(1);ratio->setValue(4);QTest::qWait(80);
                     stream();QTest::qWait(80);bool restored=read();ok=ok&&restored&&frame.node.gain_db[1]<-10;
                     std::printf("BAND_EDITOR deferred=%d moved=%g neutral=%d restored_gain=%g pass=%d\n",deferred,moved,neutral,frame.node.gain_db[1],ok);
+                }
+            }
+            if(transient){
+                auto* crossover=dialog->findChild<QWidget*>("bandCrossover");
+                auto* band=dialog->findChild<QComboBox*>("bandSelect");
+                auto* attack=dialog->findChild<QDoubleSpinBox*>("bandAttack");
+                auto* sustain=dialog->findChild<QDoubleSpinBox*>("bandSustain");
+                ok=ok&&n.kind==TelemetryKind::BandTransient&&crossover&&band&&attack&&sustain;
+                if(crossover&&band&&attack&&sustain){
+                    band->setCurrentIndex(1);ok=ok&&attack->value()==12&&sustain->value()==-12;
+                    stream(5,.04);QTest::qWait(60);bool decay=read();
+                    ok=ok&&decay&&frame.node.peak[1]<-.4&&frame.node.gain_db[1]<-4;
+                    double decayGain=frame.node.gain_db[1];
+                    if(qEnvironmentVariableIsSet("HYPERDSP_FILTER_SCREENSHOT"))dialog->grab().save(qEnvironmentVariable("HYPERDSP_FILTER_SCREENSHOT")+".transient-decay.png");
+                    sustain->setValue(6);QTest::qWait(60);stream(5,.4);stream(5,.04);
+                    bool changed=read();double boosted=frame.node.gain_db[1];ok=ok&&changed&&frame.node.peak[1]<-.2&&boosted>1;
+                    auto* settings=obs_source_get_settings(f);
+                    ok=ok&&obs_data_get_double(settings,"mid_sustain_db")==6&&obs_data_get_double(settings,"low_sustain_db")==0;
+                    obs_data_release(settings);
+                    auto pt=[&](double hz){return QPointF(12+(crossover->width()-24)*std::log(hz/20)/std::log(1000.),32).toPoint();};
+                    QTest::mousePress(crossover,Qt::LeftButton,Qt::NoModifier,pt(2500));QTest::mouseMove(crossover,pt(4000),40);QTest::qWait(80);
+                    settings=obs_source_get_settings(f);bool deferred=obs_data_get_double(settings,"high_hz")==2500;obs_data_release(settings);
+                    QTest::mouseRelease(crossover,Qt::LeftButton,Qt::NoModifier,pt(4000));QTest::qWait(60);
+                    settings=obs_source_get_settings(f);double high=obs_data_get_double(settings,"high_hz");obs_data_release(settings);
+                    ok=ok&&deferred&&std::abs(high-4000)<100;
+                    auto mode=[&](int value){auto* patch=obs_data_create();obs_data_set_int(patch,"mode",value);obs_source_update(f,patch);obs_data_release(patch);QTest::qWait(70);};
+                    mode(1);ok=ok&&!crossover->isVisible()&&!read();
+                    auto* broadAttack=dialog->findChild<QDoubleSpinBox*>("transientAttack");
+                    auto* broadSustain=dialog->findChild<QDoubleSpinBox*>("transientSustain");
+                    auto* attackTime=dialog->findChild<QDoubleSpinBox*>("transientAttackTime");
+                    auto* sustainTime=dialog->findChild<QDoubleSpinBox*>("transientSustainTime");
+                    ok=ok&&broadAttack&&broadSustain&&attackTime&&sustainTime;
+                    if(broadAttack&&broadSustain&&attackTime&&sustainTime){
+                        ok=ok&&broadAttack->isVisible()&&attackTime->isVisible();
+                        broadAttack->setValue(9);broadSustain->setValue(-6);
+                        attackTime->setValue(40);sustainTime->setValue(220);
+                        stream(1);ok=ok&&read()&&frame.node.kind==TelemetryKind::Transient&&frame.node.gain_db[0]>4;
+                        settings=obs_source_get_settings(f);
+                        ok=ok&&obs_data_get_double(settings,"attack_db")==9&&obs_data_get_double(settings,"mid_attack_db")==12&&obs_data_get_double(settings,"attack_ms")==40;
+                        obs_data_release(settings);
+                        mode(2);ok=ok&&!broadAttack->isVisible()&&attackTime->isVisible()&&attackTime->value()==40&&sustainTime->value()==220;
+                        mode(0);ok=ok&&!attackTime->isVisible()&&!broadAttack->isVisible()&&!crossover->isVisible();
+                    }
+                    mode(2);ok=ok&&crossover->isVisible()&&sustain->value()==6;
+                    if(qEnvironmentVariableIsSet("HYPERDSP_FILTER_SCREENSHOT"))dialog->grab().save(qEnvironmentVariable("HYPERDSP_FILTER_SCREENSHOT")+".transient-edited.png");
+                    std::printf("TRANSIENT_EDITOR decay=%g boost=%g changed=%d deferred=%d high=%g pass=%d\n",decayGain,boosted,changed,deferred,high,ok);
                 }
             }
             dialog->hide();QTest::qWait(1050);
