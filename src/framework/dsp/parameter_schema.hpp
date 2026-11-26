@@ -8,6 +8,7 @@
 #include "formant.hpp"
 #include "multiband.hpp"
 #include "stereo.hpp"
+#include "transient.hpp"
 #include <map>
 #include <string>
 #include <string_view>
@@ -61,6 +62,14 @@ inline constexpr FloatParameter<DynamicsSettings> dynamics_parameters[]={
     {"input_db","Input gain",-24,24,.1," dB",&DynamicsSettings::input_db},
     {"mix","Wet / dry",0,1,.01,"",&DynamicsSettings::wet},
     {"output_db","Output gain",-24,24,.1," dB",&DynamicsSettings::output_db}};
+inline constexpr FloatParameter<TransientSettings> transient_parameters[]={
+    {"attack_db","Attack gain",-12,12,.1," dB",&TransientSettings::attack_db},
+    {"sustain_db","Sustain gain",-12,12,.1," dB",&TransientSettings::sustain_db},
+    {"attack_ms","Attack contour",5,100,1," ms",&TransientSettings::attack_ms},
+    {"sustain_ms","Sustain contour",50,500,1," ms",&TransientSettings::sustain_ms},
+    {"input_db","Input gain",-24,24,.1," dB",&TransientSettings::input_db},
+    {"mix","Wet / dry",0,1,.01,"",&TransientSettings::wet},
+    {"output_db","Output gain",-24,24,.1," dB",&TransientSettings::output_db}};
 inline constexpr FloatParameter<StereoSettings> stereo_parameters[]={
     {"width","Stereo width",0,2,.01," ×",&StereoSettings::width},
     {"mid_db","Mid gain",-24,24,.1," dB",&StereoSettings::mid_db},

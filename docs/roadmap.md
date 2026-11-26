@@ -69,6 +69,8 @@ Standalone conventional audio effects and hosting for OBS, with optional inputs 
 
 - Stereo imaging with mid/side gain, width/balance, shared graph parameters and standalone output correlation/mono-fold diagnostics.
 
+- Linked-channel transient attack/decay shaping, independent signed gains and adjustable contour timing; shared standalone/graph engine and actual OBS audio verification.
+
 ## Next layers
 
 - Unified discoverable effect library: favorites, native/installed external/community definitions, backend compatibility, descriptions, safe explicit acquisition and reusable presets. Reset/import/export and a compact native frequency-response view.

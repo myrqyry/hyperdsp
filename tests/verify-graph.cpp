@@ -58,7 +58,7 @@ int main(){
     s.nodes[1].params["oversample"]=3;ok=ok&&!g.replace(s,48000,2,error);
     // Each remaining native mode must compile and actually process audio.
     const std::pair<const char*,int> families[]={{"mic_modeler_filter",6},{"hyperdsp_native_filter",9},
-        {"hyperdsp_dynamics_filter",4},{"hyperdsp_multiband_filter",1},{"hyperdsp_stereo_filter",1},{"hyperdsp_time_filter",5},{"hyperdsp_space_filter",2},{"hyperdsp_formant_filter",2}};
+        {"hyperdsp_dynamics_filter",4},{"hyperdsp_multiband_filter",1},{"hyperdsp_stereo_filter",1},{"hyperdsp_transient_filter",1},{"hyperdsp_time_filter",5},{"hyperdsp_space_filter",2},{"hyperdsp_formant_filter",2}};
     for(auto [family,count]:families)for(int mode=1;mode<=count;++mode){
         GraphSpec native{{{std::string("native:")+family+":"+std::to_string(mode),{},{{-1,1}}}},0};
         GraphRuntime a,b;
@@ -77,7 +77,7 @@ int main(){
             }
         }
         bool cross=(std::string_view(family)=="hyperdsp_time_filter"&&mode==2)||(std::string_view(family)=="hyperdsp_space_filter"&&mode==2);
-        bool identity=(std::string_view(family)=="hyperdsp_native_filter"&&mode>=5&&mode<=7)||std::string_view(family)=="hyperdsp_stereo_filter";
+        bool identity=(std::string_view(family)=="hyperdsp_native_filter"&&mode>=5&&mode<=7)||std::string_view(family)=="hyperdsp_stereo_filter"||std::string_view(family)=="hyperdsp_transient_filter";
         bool pass=finite&&partition<2e-6&&energy>1e-8&&(identity||delta>1e-3)&&(cross||right_energy<1e-10);
         std::printf("GRAPH_NATIVE %s:%d energy=%g delta=%g partition=%g right=%g pass=%d\n",family,mode,energy,delta,partition,right_energy,pass);
         ok=ok&&pass;
