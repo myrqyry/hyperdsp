@@ -79,6 +79,8 @@ Standalone conventional audio effects and hosting for OBS, with optional inputs 
 
 - Applied graph Node activity: actual dynamics gain/detector state, three-band compressor detector and reduction meters, frozen wet Dynamic EQ response, backward-compatible V3 snapshot.
 
+- Standalone live analysis for Dynamics, Multiband and Dynamic EQ, shared node plots, demand-driven telemetry, native property button and weak-source window lifecycle.
+
 ## Next layers
 
 - Unified discoverable effect library: favorites, native/installed external/community definitions, backend compatibility, descriptions, safe explicit acquisition and reusable presets. Reset/import/export and a compact native frequency-response view.

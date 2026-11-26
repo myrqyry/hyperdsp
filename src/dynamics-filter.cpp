@@ -1,4 +1,5 @@
 #include "effect-library.hpp"
+#include "framework/obs/filter_telemetry.hpp"
 #include "framework/obs/parameter_properties.hpp"
 #include <obs-module.h>
 #include "framework/dsp/dynamics.hpp"
@@ -9,7 +10,7 @@ namespace {
 using namespace hyperdsp;
 struct Source {
     std::mutex mutex;
-    Dynamics engine;
+    Dynamics engine;FilterTelemetry telemetry;bool active=false;
     ExternalInputs external;
     unsigned rate=0,channels=0;
 };
@@ -29,14 +30,15 @@ void defaults(obs_data_t* s){
 void update(void* ptr,obs_data_t* s){
     auto* f=static_cast<Source*>(ptr);if(!f)return;
     auto settings=read(s);obs_audio_info ai{};if(!obs_get_audio_info(&ai))return;
-    std::lock_guard lock(f->mutex);
+    std::lock_guard lock(f->mutex);f->telemetry.invalidate();
+    f->active=settings.mode!=DynamicsMode::Bypass;
     for(unsigned i=0;i<modulation_slots;++i)obs_routes::connect(f->external,s,i,settings.routes[i].source);
     auto channels=get_audio_channels(ai.speakers);
     if(f->rate!=ai.samples_per_sec||f->channels!=channels){
         f->rate=ai.samples_per_sec;f->channels=channels;f->engine.reset(f->rate,settings);
     }else f->engine.set(settings);
 }
-void* create(obs_data_t* s,obs_source_t*){auto f=std::make_unique<Source>();update(f.get(),s);return f.release();}
+void* create(obs_data_t* s,obs_source_t* source){auto f=std::make_unique<Source>();f->telemetry.attach(source);update(f.get(),s);return f.release();}
 void destroy(void* p){delete static_cast<Source*>(p);}
 const char* name(void*){return "HyperDSP Dynamics";}
 bool visibility(obs_properties_t* p,obs_property_t* prop,obs_data_t* s){
@@ -47,7 +49,7 @@ bool visibility(obs_properties_t* p,obs_property_t* prop,obs_data_t* s){
     show("attack",mode>=1&&mode<=3);show("release",mode!=0);show("threshold",mode!=0);
     return obs_routes::visibility(p,prop,s);
 }
-obs_properties_t* properties(void*){
+obs_properties_t* properties(void* ptr){
     auto* p=obs_properties_create();
     auto* mode=obs_properties_add_list(p,"mode","Dynamics type",OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_INT);
     hyperdsp::add_native_modes(mode,hyperdsp::dynamics_modes);
@@ -66,16 +68,17 @@ obs_properties_t* properties(void*){
     obs_parameters::add(p,dynamics_parameters[11]);
     obs_routes::add(p,{"Threshold (dB)","Ratio","Makeup (dB)","Range (dB)","Wet / dry","Output amplitude"},
         "Signed amount in destination units. Threshold ±80 dB, ratio ±19, makeup ±24 dB, range ±100 dB, mix/output ±1 per route. Summed before bounds.");
-    obs_property_set_modified_callback(mode,visibility);return p;
+    obs_property_set_modified_callback(mode,visibility);if(ptr)static_cast<Source*>(ptr)->telemetry.add_button(p);return p;
 }
 obs_audio_data* process(void* p,obs_audio_data* audio){
     auto* f=static_cast<Source*>(p);if(!f||!audio)return audio;
-    std::unique_lock lock(f->mutex,std::try_to_lock);if(!lock.owns_lock())return audio;
+    std::unique_lock lock(f->mutex,std::try_to_lock);if(!lock.owns_lock()){f->telemetry.invalidate();return audio;}
     obs_audio_info ai{};if(!obs_get_audio_info(&ai)||ai.samples_per_sec!=f->rate||
-        f->rate<8000||f->rate>192000||get_audio_channels(ai.speakers)!=f->channels||f->channels>MAX_AUDIO_CHANNELS)return audio;
+        f->rate<8000||f->rate>192000||get_audio_channels(ai.speakers)!=f->channels||f->channels>MAX_AUDIO_CHANNELS){f->telemetry.invalidate();return audio;}
     std::array<float*,MAX_AUDIO_CHANNELS> buffers{};
     for(unsigned c=0;c<f->channels;++c)buffers[c]=reinterpret_cast<float*>(audio->data[c]);
     f->engine.external_values(f->external.snapshot());f->engine.process(buffers.data(),f->channels,audio->frames);
+    if(f->active&&audio->frames)f->telemetry.publish(f->rate,[&]{return dynamics_telemetry(f->engine);});
     return audio;
 }
 }

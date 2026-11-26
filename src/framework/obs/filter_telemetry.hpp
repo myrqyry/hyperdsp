@@ -1,0 +1,64 @@
+#pragma once
+#include "framework/dsp/node_telemetry.hpp"
+#include <obs-module.h>
+#include <util/platform.h>
+#include <atomic>
+#include <mutex>
+#ifdef HYPERDSP_WITH_BUILDER
+#include "ui/filter_analysis.hpp"
+#endif
+namespace hyperdsp {
+// No reader ever holds the filter's processing mutex. Publication is
+// demand-driven and never waits for a reader; invalidation is lock-free.
+class FilterTelemetry {
+    obs_source_t* source_=nullptr;
+    std::atomic<uint64_t> request_{0},epoch_{1};
+    std::mutex snapshot_mutex_;
+    FilterTelemetryFrame published_{};
+    static void read_proc(void* ptr,calldata_t* data){
+        auto* self=static_cast<FilterTelemetry*>(ptr);
+        calldata_set_bool(data,"available",false);
+        void* raw=nullptr;
+        if(!self||!calldata_get_ptr(data,"frame",&raw)||!raw)return;
+        auto& frame=*static_cast<FilterTelemetryFrame*>(raw);
+        if(frame.version!=1||frame.size!=sizeof(frame))return;
+        if(!obs_source_enabled(self->source_)){self->invalidate();return;}
+        auto now=os_gettime_ns();self->request_.store(now);
+        std::lock_guard lock(self->snapshot_mutex_);
+        const auto& v=self->published_;
+        if(!v.stamp||v.epoch!=self->epoch_.load()||now<v.stamp||now-v.stamp>500000000ULL)return;
+        frame=v;calldata_set_bool(data,"available",true);
+    }
+#ifdef HYPERDSP_WITH_BUILDER
+    static bool open(obs_properties_t*,obs_property_t*,void* ptr){
+        auto* self=static_cast<FilterTelemetry*>(ptr);
+        if(self)show_filter_analysis(self->source_);
+        return false;
+    }
+#endif
+public:
+    static_assert(std::atomic<uint64_t>::is_always_lock_free);
+    void attach(obs_source_t* source){
+        source_=source;
+        proc_handler_add(obs_source_get_proc_handler(source),"void hyperdsp_filter_telemetry_v1(in ptr frame, out bool available)",read_proc,this);
+    }
+    void invalidate(){epoch_.fetch_add(1);}
+    template<class ReadNode>
+    void publish(unsigned rate,ReadNode read){
+        auto request=request_.load();if(!request)return;
+        auto now=os_gettime_ns();
+        if(now<request||now-request>1000000000ULL)return;
+        auto epoch=epoch_.load();
+        std::unique_lock lock(snapshot_mutex_,std::try_to_lock);
+        if(!lock.owns_lock())return;
+        published_.node=read();published_.rate=rate;published_.stamp=now;published_.epoch=epoch;
+    }
+    void add_button(obs_properties_t* p){
+#ifdef HYPERDSP_WITH_BUILDER
+        obs_properties_add_button2(p,"open_analysis","Open live analysis",open,this);
+#else
+        (void)p;
+#endif
+    }
+};
+}

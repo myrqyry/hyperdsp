@@ -92,6 +92,10 @@ All four shared modulation routes are available, including optional Sound and Si
 
 Numerical and real libobs tests cover static curves, stereo linkage, soft knee, gate hold/hysteresis, sample ceiling across 44.1/48/96 kHz, nonfinite sample handling, bypass and Sound-driven attenuation using the versioned contract fixture. See [dynamics verification](docs/dynamics.md).
 
+## Standalone live analysis
+
+The native **HyperDSP Dynamics**, **Multiband**, and **Dynamic EQ** filter properties include **Open live analysis** when the optional Qt frontend is built. The modeless window follows that exact filter and uses the same plots as the Effect Builder: actual detector peaks and smoothed gain reduction, independent band meters, or a frozen wet Dynamic EQ curve. It stops polling when hidden and closes when its source is destroyed. DSP-only builds retain the telemetry procedure without a GUI dependency. See [standalone analysis](docs/filter-analysis.md).
+
 ## Dynamic EQ / de-essing
 
 **HyperDSP Dynamic EQ** uses a frequency-selective peak detector to attenuate or boost loud components around an adjustable center frequency. Set the Q, threshold, ratio, signed dynamic gain limit, knee and attack/release; input/output trim and wet/dry are shared with the other native effects. The same engine is available as a graph node with eleven macro-bindable parameters. The bundled Vocal De Esser preset starts at 6.5 kHz, with a −9 dB dynamic cut limit and adjustable depth, sensitivity and frequency. No lookahead, external sidechain, fixed buffering latency or internal peak limiter. See [dynamic EQ design and tests](docs/dynamic-eq.md).

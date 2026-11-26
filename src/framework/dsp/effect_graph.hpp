@@ -361,14 +361,11 @@ public:
             std::visit([&](const auto& engine){
                 using T=std::decay_t<decltype(engine)>;
                 if constexpr(std::is_same_v<T,std::unique_ptr<Dynamics>>){
-                    n.kind=TelemetryKind::Dynamics;n.mode=unsigned(engine->mode());
-                    n.peak[0]=engine->detector_peak();n.gain_db[0]=-engine->gain_reduction_db();
+                    n=dynamics_telemetry(*engine);
                 }else if constexpr(std::is_same_v<T,std::unique_ptr<DynamicEq>>){
-                    n.kind=TelemetryKind::DynamicEq;n.peak[0]=engine->detector_peak();
-                    n.gain_db[0]=engine->dynamic_gain_db();n.frequency=engine->current_frequency();n.q=engine->current_q();
+                    n=dynamic_eq_telemetry(*engine);
                 }else if constexpr(std::is_same_v<T,std::unique_ptr<Multiband>>){
-                    n.kind=TelemetryKind::Multiband;n.low_hz=engine->low_frequency();n.high_hz=engine->high_frequency();
-                    for(unsigned b=0;b<3;++b){n.peak[b]=engine->detector_peak(b);n.gain_db[b]=-engine->gain_reduction_db(b);}
+                    n=multiband_telemetry(*engine);
                 }
             },nodes_[i].engine);
         }

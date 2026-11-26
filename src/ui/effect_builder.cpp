@@ -1,4 +1,7 @@
 #include "effect_builder.hpp"
+#include "filter_analysis.hpp"
+#include <QDialog>
+#include <QThread>
 #include "audition_panel.hpp"
 #include "effect-metadata.hpp"
 #include "framework/dsp/monitor_spectrum.hpp"
@@ -296,6 +299,49 @@ protected:
         }
     }
 };
+class FilterAnalysisDialog final:public QDialog {
+    obs_weak_source_t* weak_;
+    NodeAnalysisPlot* plot_;
+    QLabel* status_;
+    QLabel* detail_;
+    QTimer timer_;
+    void clear(){plot_->clear();status_->setText("Waiting for active filter audio");detail_->clear();}
+    void poll(){
+        auto* source=obs_weak_source_get_source(weak_);
+        if(!source){close();return;}
+        FilterTelemetryFrame frame{};
+        calldata_t d;calldata_init(&d);calldata_set_ptr(&d,"frame",&frame);
+        bool ready=proc_handler_call(obs_source_get_proc_handler(source),"hyperdsp_filter_telemetry_v1",&d)&&calldata_bool(&d,"available");
+        calldata_free(&d);
+        setWindowTitle(QString("HyperDSP · %1").arg(QString::fromUtf8(obs_source_get_name(source))));
+        obs_source_release(source);
+        if(!ready||frame.rate<8000||frame.rate>192000||frame.node.kind==TelemetryKind::None){clear();return;}
+        const auto& n=frame.node;plot_->setNode(n,frame.rate);
+        status_->setText(QString("Live · %1 kHz").arg(frame.rate/1000.,0,'g',4));
+        if(n.kind==TelemetryKind::DynamicEq)detail_->setText(QString("Dynamic gain %1 dB · detector %2 dBFS · frozen wet response, excludes mix/trim")
+            .arg(n.gain_db[0],0,'f',1).arg(20*std::log10(std::max(n.peak[0],1e-6f)),0,'f',1));
+        else if(n.kind==TelemetryKind::Multiband)detail_->setText(QString("Crossovers %1 / %2 Hz · detector (upper) / gain reduction (lower), before makeup and mix")
+            .arg(n.low_hz,0,'f',0).arg(n.high_hz,0,'f',0));
+        else detail_->setText(QString("Smoothed gain %1 dB · detector (upper) / gain reduction (lower), before makeup and mix").arg(n.gain_db[0],0,'f',1));
+    }
+public:
+    FilterAnalysisDialog(obs_source_t* source,QWidget* parent):QDialog(parent),weak_(obs_source_get_weak_source(source)){
+        setObjectName("hyperdspFilterAnalysis");setAttribute(Qt::WA_DeleteOnClose);setModal(false);
+        auto* layout=new QVBoxLayout(this);layout->setContentsMargins(8,8,8,8);layout->setSpacing(5);
+        status_=new QLabel;status_->setObjectName("filterAnalysisStatus");status_->setTextFormat(Qt::PlainText);layout->addWidget(status_);
+        plot_=new NodeAnalysisPlot(this);layout->addWidget(plot_,1);
+        detail_=new QLabel;detail_->setTextFormat(Qt::PlainText);detail_->setWordWrap(true);layout->addWidget(detail_);
+        auto* closeButton=new QPushButton("Close",this);connect(closeButton,&QPushButton::clicked,this,&QDialog::close);layout->addWidget(closeButton);
+        clear();resize(480,320);
+        timer_.setInterval(50);connect(&timer_,&QTimer::timeout,this,[this]{poll();});
+    }
+    ~FilterAnalysisDialog()override{timer_.stop();obs_weak_source_release(weak_);}
+    bool matches(obs_source_t* source)const{return obs_weak_source_references_source(weak_,source);}
+protected:
+    void showEvent(QShowEvent* event)override{QDialog::showEvent(event);timer_.start();poll();}
+    void hideEvent(QHideEvent* event)override{timer_.stop();clear();QDialog::hideEvent(event);}
+};
+std::vector<QPointer<FilterAnalysisDialog>> filterDialogs;
 class MonitorPanel final:public QWidget {
     MonitorPlot* plot_;
     LiveAnalysisPlot* analysis_;
@@ -1439,16 +1485,33 @@ void frontend_event(enum obs_frontend_event event,void*){
         }else {blog(LOG_WARNING,"[HyperDSP] Effect Builder dock registration rejected");delete widget;}
     }else if(event==OBS_FRONTEND_EVENT_THEME_CHANGED&&dock){
         QTimer::singleShot(0,dock.data(),[]{if(dock)dock->refreshTheme();});
-    }else if(event==OBS_FRONTEND_EVENT_EXIT&&dock){
+    }else if(event==OBS_FRONTEND_EVENT_EXIT){
+        close_filter_analysis();if(!dock)return;
         obs_frontend_remove_dock("hyperdsp.effect_builder");if(dock)delete dock.data();dock=nullptr;
     }
 }
+}
+void show_filter_analysis(obs_source_t* source){
+    auto* app=qobject_cast<QApplication*>(QCoreApplication::instance());
+    if(!source||!app||QThread::currentThread()!=app->thread())return;
+    std::erase_if(filterDialogs,[](const auto& dialog){return dialog.isNull();});
+    for(auto& dialog:filterDialogs)if(dialog&&dialog->matches(source)){dialog->show();dialog->raise();dialog->activateWindow();return;}
+    auto* parent=QApplication::activeWindow();
+    // A different analysis window must not own this one.
+    if(parent&&parent->objectName()=="hyperdspFilterAnalysis")parent=nullptr;
+    auto* dialog=new FilterAnalysisDialog(source,parent);
+    filterDialogs.emplace_back(dialog);dialog->show();
+}
+void close_filter_analysis(){
+    for(auto& dialog:filterDialogs)if(dialog)delete dialog.data();
+    filterDialogs.clear();
 }
 void register_effect_builder(){
     if(registered||!qobject_cast<QApplication*>(QCoreApplication::instance())||!obs_frontend_get_main_window())return;
     obs_frontend_add_event_callback(frontend_event,nullptr);registered=true;blog(LOG_INFO,"[HyperDSP] Effect Builder dock deferred to frontend startup");
 }
 void unregister_effect_builder(){
+    close_filter_analysis();
     if(registered){obs_frontend_remove_event_callback(frontend_event,nullptr);registered=false;}
     if(dock){obs_frontend_remove_dock("hyperdsp.effect_builder");if(dock)delete dock.data();dock=nullptr;}
 }
