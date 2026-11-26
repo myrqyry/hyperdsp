@@ -1,0 +1,113 @@
+{
+  "schema": 1,
+  "nodes": [
+    {
+      "effect": "native:hyperdsp_native_filter:2",
+      "params": {
+        "frequency": 350,
+        "stages": 1
+      },
+      "inputs": [
+        {
+          "source": -1,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "effect": "native:hyperdsp_native_filter:1",
+      "params": {
+        "frequency": 3500,
+        "stages": 2,
+        "alignment": 1
+      },
+      "inputs": [
+        {
+          "source": 0,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "effect": "native:hyperdsp_native_filter:5",
+      "params": {
+        "frequency": 1700,
+        "q": 1.4,
+        "gain_db": 3
+      },
+      "inputs": [
+        {
+          "source": 1,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "effect": "native:hyperdsp_color_filter:2",
+      "params": {
+        "oversample": 2,
+        "drive": 8,
+        "output_db": -4
+      },
+      "inputs": [
+        {
+          "source": 2,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "effect": "native:hyperdsp_dynamics_filter:4",
+      "params": {
+        "threshold": -3
+      },
+      "inputs": [
+        {
+          "source": 3,
+          "weight": 1
+        }
+      ]
+    }
+  ],
+  "output": 4,
+  "controls": [
+    {
+      "id": "rt_band",
+      "name": "Bandwidth",
+      "default": 0.4,
+      "bindings": [
+        {
+          "node": 0,
+          "parameter": "frequency",
+          "low": 700,
+          "high": 180
+        },
+        {
+          "node": 1,
+          "parameter": "frequency",
+          "low": 2400,
+          "high": 5500
+        }
+      ]
+    },
+    {
+      "id": "rt_grit",
+      "name": "Grit",
+      "default": 0.35,
+      "bindings": [
+        {
+          "node": 3,
+          "parameter": "drive",
+          "low": 0,
+          "high": 18
+        },
+        {
+          "node": 3,
+          "parameter": "output_db",
+          "low": 0,
+          "high": -10
+        }
+      ]
+    }
+  ]
+}

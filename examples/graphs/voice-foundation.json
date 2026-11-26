@@ -1,0 +1,138 @@
+{
+  "schema": 1,
+  "nodes": [
+    {
+      "effect": "native:hyperdsp_native_filter:2",
+      "params": {
+        "frequency": 75,
+        "stages": 2,
+        "alignment": 1
+      },
+      "inputs": [
+        {
+          "source": -1,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "effect": "native:hyperdsp_dynamics_filter:2",
+      "params": {
+        "threshold": -44,
+        "ratio": 2,
+        "range": 12,
+        "attack": 5,
+        "release": 180
+      },
+      "inputs": [
+        {
+          "source": 0,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "effect": "native:hyperdsp_native_filter:5",
+      "params": {
+        "frequency": 3000,
+        "q": 0.8
+      },
+      "inputs": [
+        {
+          "source": 1,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "effect": "native:hyperdsp_dynamics_filter:1",
+      "params": {
+        "threshold": -18,
+        "ratio": 3,
+        "knee": 6,
+        "attack": 12,
+        "release": 150,
+        "makeup": 2
+      },
+      "inputs": [
+        {
+          "source": 2,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "effect": "native:hyperdsp_dynamics_filter:4",
+      "params": {
+        "threshold": -2,
+        "release": 100
+      },
+      "inputs": [
+        {
+          "source": 3,
+          "weight": 1
+        }
+      ]
+    }
+  ],
+  "output": 4,
+  "controls": [
+    {
+      "id": "vf_cleanup",
+      "name": "Room cleanup",
+      "default": 0.35,
+      "bindings": [
+        {
+          "node": 1,
+          "parameter": "range",
+          "low": 0,
+          "high": 24
+        },
+        {
+          "node": 1,
+          "parameter": "threshold",
+          "low": -55,
+          "high": -35
+        }
+      ]
+    },
+    {
+      "id": "vf_presence",
+      "name": "Presence",
+      "default": 0.35,
+      "bindings": [
+        {
+          "node": 2,
+          "parameter": "gain_db",
+          "low": 0,
+          "high": 4
+        }
+      ]
+    },
+    {
+      "id": "vf_level",
+      "name": "Leveling",
+      "default": 0.4,
+      "bindings": [
+        {
+          "node": 3,
+          "parameter": "threshold",
+          "low": -10,
+          "high": -26
+        },
+        {
+          "node": 3,
+          "parameter": "ratio",
+          "low": 1.5,
+          "high": 5
+        },
+        {
+          "node": 3,
+          "parameter": "makeup",
+          "low": 0,
+          "high": 4
+        }
+      ]
+    }
+  ]
+}

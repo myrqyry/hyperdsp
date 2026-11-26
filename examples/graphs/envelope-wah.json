@@ -1,0 +1,90 @@
+{
+  "schema": 1,
+  "nodes": [
+    {
+      "effect": "native:hyperdsp_native_filter:3",
+      "params": {
+        "frequency": 500,
+        "q": 1.8,
+        "mix": 0.7
+      },
+      "inputs": [
+        {
+          "source": -1,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "effect": "native:hyperdsp_color_filter:1",
+      "params": {
+        "drive": 3,
+        "oversample": 2,
+        "mix": 0.35,
+        "output_db": -2
+      },
+      "inputs": [
+        {
+          "source": 0,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "effect": "native:hyperdsp_dynamics_filter:4",
+      "params": {
+        "threshold": -2
+      },
+      "inputs": [
+        {
+          "source": 1,
+          "weight": 1
+        }
+      ]
+    }
+  ],
+  "output": 2,
+  "controls": [
+    {
+      "id": "ew_sweep",
+      "name": "Wah position",
+      "default": 0.12,
+      "bindings": [
+        {
+          "node": 0,
+          "parameter": "frequency",
+          "low": 250,
+          "high": 3400
+        }
+      ]
+    },
+    {
+      "id": "ew_res",
+      "name": "Resonance",
+      "default": 0.35,
+      "bindings": [
+        {
+          "node": 0,
+          "parameter": "q",
+          "low": 0.7,
+          "high": 4.5
+        },
+        {
+          "node": 0,
+          "parameter": "mix",
+          "low": 0.35,
+          "high": 0.9
+        }
+      ]
+    }
+  ],
+  "routes": [
+    {
+      "control": "ew_sweep",
+      "source": 2,
+      "amount": 0.9,
+      "attack": 8,
+      "release": 180
+    }
+  ]
+}

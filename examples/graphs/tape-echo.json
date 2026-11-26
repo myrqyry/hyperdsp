@@ -1,0 +1,126 @@
+{
+  "schema": 1,
+  "nodes": [
+    {
+      "effect": "native:hyperdsp_color_filter:1",
+      "params": {
+        "drive": 6,
+        "mix": 0.6,
+        "oversample": 2,
+        "output_db": -3
+      },
+      "inputs": [
+        {
+          "source": -1,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "effect": "native:hyperdsp_native_filter:7",
+      "params": {
+        "frequency": 4500,
+        "gain_db": -5
+      },
+      "inputs": [
+        {
+          "source": 0,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "effect": "native:hyperdsp_time_filter:2",
+      "params": {
+        "delay_ms": 280,
+        "feedback": 0.32,
+        "damping": 0.5,
+        "mix": 0.3
+      },
+      "inputs": [
+        {
+          "source": 1,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "effect": "native:hyperdsp_dynamics_filter:4",
+      "params": {
+        "threshold": -2
+      },
+      "inputs": [
+        {
+          "source": 2,
+          "weight": 1
+        }
+      ]
+    }
+  ],
+  "output": 3,
+  "controls": [
+    {
+      "id": "te_age",
+      "name": "Tape age",
+      "default": 0.4,
+      "bindings": [
+        {
+          "node": 0,
+          "parameter": "drive",
+          "low": 1,
+          "high": 12
+        },
+        {
+          "node": 0,
+          "parameter": "output_db",
+          "low": -1,
+          "high": -7
+        },
+        {
+          "node": 1,
+          "parameter": "gain_db",
+          "low": 0,
+          "high": -12
+        },
+        {
+          "node": 2,
+          "parameter": "damping",
+          "low": 0.15,
+          "high": 0.8
+        }
+      ]
+    },
+    {
+      "id": "te_echo",
+      "name": "Echo",
+      "default": 0.35,
+      "bindings": [
+        {
+          "node": 2,
+          "parameter": "mix",
+          "low": 0,
+          "high": 0.55
+        },
+        {
+          "node": 2,
+          "parameter": "feedback",
+          "low": 0.1,
+          "high": 0.65
+        }
+      ]
+    },
+    {
+      "id": "te_time",
+      "name": "Delay time",
+      "default": 0.35,
+      "bindings": [
+        {
+          "node": 2,
+          "parameter": "delay_ms",
+          "low": 90,
+          "high": 650
+        }
+      ]
+    }
+  ]
+}

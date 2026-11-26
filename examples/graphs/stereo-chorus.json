@@ -1,0 +1,101 @@
+{
+  "schema": 1,
+  "nodes": [
+    {
+      "effect": "native:hyperdsp_time_filter:3",
+      "params": {
+        "delay_ms": 16,
+        "depth_ms": 2,
+        "rate_hz": 0.45,
+        "stereo": 1,
+        "mix": 0.4,
+        "feedback": 0.05
+      },
+      "inputs": [
+        {
+          "source": -1,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "effect": "native:hyperdsp_native_filter:7",
+      "params": {
+        "frequency": 6500,
+        "gain_db": -2
+      },
+      "inputs": [
+        {
+          "source": 0,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "effect": "native:hyperdsp_dynamics_filter:4",
+      "params": {
+        "threshold": -2
+      },
+      "inputs": [
+        {
+          "source": 1,
+          "weight": 1
+        }
+      ]
+    }
+  ],
+  "output": 2,
+  "controls": [
+    {
+      "id": "sc_width",
+      "name": "Chorus width",
+      "default": 0.45,
+      "bindings": [
+        {
+          "node": 0,
+          "parameter": "depth_ms",
+          "low": 0.5,
+          "high": 4
+        },
+        {
+          "node": 0,
+          "parameter": "stereo",
+          "low": 0,
+          "high": 1
+        },
+        {
+          "node": 0,
+          "parameter": "mix",
+          "low": 0.15,
+          "high": 0.6
+        }
+      ]
+    },
+    {
+      "id": "sc_rate",
+      "name": "Movement",
+      "default": 0.35,
+      "bindings": [
+        {
+          "node": 0,
+          "parameter": "rate_hz",
+          "low": 0.15,
+          "high": 1.2
+        }
+      ]
+    },
+    {
+      "id": "sc_tone",
+      "name": "Warmth",
+      "default": 0.4,
+      "bindings": [
+        {
+          "node": 1,
+          "parameter": "gain_db",
+          "low": 0,
+          "high": -6
+        }
+      ]
+    }
+  ]
+}

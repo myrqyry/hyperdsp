@@ -690,7 +690,12 @@ void EffectBuilder::refreshPresets(){
     presets_->clear();
     if(!bundledPath_.isEmpty())for(auto& f:QDir(bundledPath_).entryInfoList({"*.json"},QDir::Files|QDir::NoSymLinks,QDir::Name)){
         BuilderDocument d;QString error;if(!BuilderStorage::readGraph(f.absoluteFilePath(),d,error))continue;
-        auto* item=new QListWidgetItem(f.completeBaseName()+" · Bundled",presets_);
+        auto words=f.completeBaseName().split('-');
+        for(auto& word:words)if(!word.isEmpty())word[0]=word[0].toUpper();
+        auto* item=new QListWidgetItem(words.join(" ")+" · Bundled",presets_);
+        auto controls=d.graph.value("controls").toArray();
+        QStringList names;for(auto c:controls)names<<c.toObject().value("name").toString();
+        item->setToolTip(QString("%1 effects · %2 modulation routes\n%3").arg(d.graph.value("nodes").toArray().size()).arg(d.graph.value("routes").toArray().size()).arg(names.join(" · ")));
         item->setData(Qt::UserRole,f.absoluteFilePath());item->setData(Qt::UserRole+1,true);
     }
     for(auto& p:storage_.presets()){

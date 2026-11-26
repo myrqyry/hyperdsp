@@ -1,0 +1,105 @@
+{
+  "schema": 1,
+  "nodes": [
+    {
+      "effect": "gain",
+      "params": {
+        "gain_db": 0
+      },
+      "inputs": [
+        {
+          "source": -1,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "effect": "native:hyperdsp_native_filter:7",
+      "params": {
+        "frequency": 2800
+      },
+      "inputs": [
+        {
+          "source": 0,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "effect": "native:hyperdsp_space_filter:2",
+      "params": {
+        "decay": 0.8,
+        "mix": 0.12,
+        "damping": 0.6
+      },
+      "inputs": [
+        {
+          "source": 1,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "effect": "native:hyperdsp_dynamics_filter:4",
+      "params": {
+        "threshold": -2
+      },
+      "inputs": [
+        {
+          "source": 2,
+          "weight": 1
+        }
+      ]
+    }
+  ],
+  "output": 3,
+  "controls": [
+    {
+      "id": "rp_pulse",
+      "name": "Pulse position",
+      "default": 0.5,
+      "bindings": [
+        {
+          "node": 0,
+          "parameter": "gain_db",
+          "low": -18,
+          "high": 0
+        },
+        {
+          "node": 1,
+          "parameter": "gain_db",
+          "low": -9,
+          "high": 0
+        }
+      ]
+    },
+    {
+      "id": "rp_space",
+      "name": "Room",
+      "default": 0.3,
+      "bindings": [
+        {
+          "node": 2,
+          "parameter": "mix",
+          "low": 0,
+          "high": 0.3
+        },
+        {
+          "node": 2,
+          "parameter": "decay",
+          "low": 0.3,
+          "high": 1.8
+        }
+      ]
+    }
+  ],
+  "routes": [
+    {
+      "control": "rp_pulse",
+      "source": 1,
+      "amount": 0.45,
+      "shape": 1,
+      "rate": 2
+    }
+  ]
+}

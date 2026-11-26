@@ -63,6 +63,8 @@ Standalone conventional audio effects and hosting for OBS, with optional inputs 
 
 - Persistent local draft and layout recovery, previous-draft slot, bundled examples and named local presets; atomic individual document writes and corrupt recovery archival; Qt restart/layout regression.
 
+- Ten bundled native graph presets with practical voice and creative reactive chains, independently tested macro endpoints, six sample-format combinations and actual OBS apply/monitor integration.
+
 ## Next layers
 
 - Unified discoverable effect library: favorites, native/installed external/community definitions, backend compatibility, descriptions, safe explicit acquisition and reusable presets. Reset/import/export and a compact native frequency-response view.

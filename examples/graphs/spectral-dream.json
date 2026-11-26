@@ -1,0 +1,112 @@
+{
+  "schema": 1,
+  "nodes": [
+    {
+      "effect": "native:hyperdsp_spectral_filter:3",
+      "params": {
+        "smear_ms": 250,
+        "mix": 0.6
+      },
+      "inputs": [
+        {
+          "source": -1,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "effect": "native:hyperdsp_space_filter:2",
+      "params": {
+        "decay": 2.5,
+        "damping": 0.55,
+        "mix": 0.3,
+        "predelay": 20
+      },
+      "inputs": [
+        {
+          "source": 0,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "effect": "gain",
+      "params": {
+        "gain_db": -2
+      },
+      "inputs": [
+        {
+          "source": -1,
+          "weight": 0.4
+        },
+        {
+          "source": 1,
+          "weight": 0.6
+        }
+      ]
+    },
+    {
+      "effect": "native:hyperdsp_dynamics_filter:4",
+      "params": {
+        "threshold": -3
+      },
+      "inputs": [
+        {
+          "source": 2,
+          "weight": 1
+        }
+      ]
+    }
+  ],
+  "output": 3,
+  "controls": [
+    {
+      "id": "sd_memory",
+      "name": "Spectral memory",
+      "default": 0.35,
+      "bindings": [
+        {
+          "node": 0,
+          "parameter": "smear_ms",
+          "low": 60,
+          "high": 1200
+        },
+        {
+          "node": 0,
+          "parameter": "mix",
+          "low": 0.2,
+          "high": 0.95
+        }
+      ]
+    },
+    {
+      "id": "sd_space",
+      "name": "Space",
+      "default": 0.35,
+      "bindings": [
+        {
+          "node": 1,
+          "parameter": "mix",
+          "low": 0.1,
+          "high": 0.65
+        },
+        {
+          "node": 1,
+          "parameter": "decay",
+          "low": 0.5,
+          "high": 5
+        }
+      ]
+    }
+  ],
+  "routes": [
+    {
+      "control": "sd_space",
+      "source": 5,
+      "amount": 0.4,
+      "attack": 20,
+      "release": 400,
+      "sensitivity": 12
+    }
+  ]
+}

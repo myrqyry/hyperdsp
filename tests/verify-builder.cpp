@@ -482,7 +482,7 @@ int main(int argc,char** argv){
             }
             tabs->setCurrentIndex(7);name->setText("Local example");QTest::mouseClick(save,Qt::LeftButton);
             int row=-1;for(int i=0;i<list->count();++i)if(list->item(i)->text().contains("Local example"))row=i;
-            persisted=persisted&&row>=0&&list->count()>=3;
+            persisted=persisted&&row>=0&&list->count()>=11;
             QTest::mouseClick(fresh,Qt::LeftButton);
             persisted=persisted&&editor.draft().value("nodes").toArray().isEmpty();
             QTest::mouseClick(previous,Qt::LeftButton);
@@ -491,6 +491,16 @@ int main(int argc,char** argv){
             if(row>=0){list->setCurrentRow(row);QTest::mouseClick(load,Qt::LeftButton);}
             persisted=persisted&&editor.draft()==saved;
             if(qEnvironmentVariableIsSet("HYPERDSP_BUILDER_SCREENSHOT"))editor.grab().save(qEnvironmentVariable("HYPERDSP_BUILDER_SCREENSHOT")+".presets.png");
+            int bundled=-1;
+            for(int i=0;i<list->count();++i)if(list->item(i)->data(Qt::UserRole+1).toBool()&&list->item(i)->text().startsWith("Envelope Wah"))bundled=i;
+            persisted=persisted&&bundled>=0;
+            if(bundled>=0){
+                auto* before=obs_source_get_settings(filter);auto accepted=std::string(obs_data_get_string(before,"graph_json"));obs_data_release(before);
+                list->setCurrentRow(bundled);QTest::mouseClick(load,Qt::LeftButton);
+                persisted=persisted&&editor.draft().value("routes").toArray().size()==1&&editor.draft().value("nodes").toArray().size()==3;
+                auto* after=obs_source_get_settings(filter);persisted=persisted&&accepted==obs_data_get_string(after,"graph_json");obs_data_release(after);
+                QTest::mouseClick(previous,Qt::LeftButton);persisted=persisted&&editor.draft()==saved;
+            }
             QTest::qWait(650); // autosave without Apply
             hyperdsp::BuilderStorage store(storage.path());hyperdsp::BuilderDocument doc;QString error;
             persisted=persisted&&store.readRecovery(doc,error)&&doc.graph==saved&&doc.positions.at(0)==position;

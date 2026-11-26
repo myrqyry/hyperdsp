@@ -1,0 +1,110 @@
+{
+  "schema": 1,
+  "nodes": [
+    {
+      "effect": "native:hyperdsp_dynamics_filter:1",
+      "params": {
+        "threshold": -24,
+        "ratio": 8,
+        "attack": 2,
+        "release": 100,
+        "makeup": 4
+      },
+      "inputs": [
+        {
+          "source": -1,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "effect": "native:hyperdsp_color_filter:1",
+      "params": {
+        "drive": 5,
+        "oversample": 2,
+        "output_db": -4
+      },
+      "inputs": [
+        {
+          "source": 0,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "effect": "gain",
+      "params": {
+        "gain_db": -2
+      },
+      "inputs": [
+        {
+          "source": -1,
+          "weight": 0.65
+        },
+        {
+          "source": 1,
+          "weight": 0.35
+        }
+      ]
+    },
+    {
+      "effect": "native:hyperdsp_dynamics_filter:4",
+      "params": {
+        "threshold": -2
+      },
+      "inputs": [
+        {
+          "source": 2,
+          "weight": 1
+        }
+      ]
+    }
+  ],
+  "output": 3,
+  "controls": [
+    {
+      "id": "pp_crush",
+      "name": "Punch",
+      "default": 0.45,
+      "bindings": [
+        {
+          "node": 0,
+          "parameter": "threshold",
+          "low": -12,
+          "high": -32
+        },
+        {
+          "node": 0,
+          "parameter": "ratio",
+          "low": 2,
+          "high": 10
+        },
+        {
+          "node": 0,
+          "parameter": "makeup",
+          "low": 0,
+          "high": 6
+        },
+        {
+          "node": 1,
+          "parameter": "drive",
+          "low": 0,
+          "high": 12
+        }
+      ]
+    },
+    {
+      "id": "pp_trim",
+      "name": "Output trim",
+      "default": 0.65,
+      "bindings": [
+        {
+          "node": 2,
+          "parameter": "gain_db",
+          "low": -8,
+          "high": 0
+        }
+      ]
+    }
+  ]
+}
