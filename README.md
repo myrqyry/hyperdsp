@@ -17,7 +17,9 @@ The first verified target is the microphone coloration filter: dynamic, condense
 
 ## Build and test (Linux)
 
-Requires a C++20 compiler, CMake, OBS development headers, libobs, Jansson development headers/library, and LADSPA SDK headers (on Mint: libjansson-dev and ladspa-sdk; Clock Sync also uses libsamplerate0-dev). Run `tests/verify.sh` for the DSP unit test and real OBS post-filter stereo capture test. No model, download, audio device or neural dependency is needed.
+Requires a C++20 compiler, CMake, OBS development headers, libobs, Jansson development headers/library, and LADSPA SDK headers (on Mint: libjansson-dev and ladspa-sdk; Clock Sync also uses libsamplerate0-dev). Run `tests/verify.sh` for a fresh Debug build and the configured CTest suite, including numerical DSP checks and real libobs audio capture. Qt widget tests require the Effect Builder dependencies and Qt 6 Test; LADSPA integration and CLI fixture tests require the SDK `amp.so` test plugin and Python 3. No model, download, physical audio device or neural dependency is needed.
+
+On a headless Linux host with Xvfb available, run `xvfb-run -a tests/verify.sh` to provide a display for libobs.
 
 ## Clock Sync
 
@@ -68,7 +70,7 @@ An effect author can expose up to eight named sliders (0–1), each mapping to o
 ]
 ```
 
-HyperDSP generates native OBS sliders from the accepted graph. Moving a slider updates the existing engines without resetting the graph, preserves delay/reverb history, and does not change fixed branch alignment. Endpoints may be reversed. Control values persist with OBS settings under graph_control_<id>; use stable IDs for the same semantic control. Native continuous settings use their existing smoothing where applicable, gain uses a 10 ms ramp, and external continuous ports update at block boundaries. Up to four graph modulation routes can drive macros from LFO, input envelope, band energy, Sound confidence or Sight motion/hand signals. Detectors advance per sample; control mappings update on a fixed 64-sample clock. Two reusable graph definitions are in [examples/graphs](examples/graphs/), also installed under data/graphs; copy their JSON into the graph filter. A graphical preset browser is future work.
+HyperDSP generates native OBS sliders from the accepted graph. Moving a slider updates the existing engines without resetting the graph, preserves delay/reverb history, and does not change fixed branch alignment. Endpoints may be reversed. Control values persist with OBS settings under graph_control_<id>; use stable IDs for the same semantic control. Native continuous settings use their existing smoothing where applicable, gain uses a 10 ms ramp, and external continuous ports update at block boundaries. Up to four graph modulation routes can drive macros from LFO, input envelope, band energy, Sound confidence or Sight motion/hand signals. Detectors advance per sample; control mappings update on a fixed 64-sample clock. Load a [bundled preset](docs/presets.md) in the Effect Builder's Presets tab, or copy its JSON from [examples/graphs](examples/graphs/) into the graph filter. The definitions are installed under `data/graphs/`.
 
 Shared native parameter definitions drive OBS controls, graph validation and the effect-library JSON metadata. LADSPA nodes use the same host engine as the standalone filter and validate live port hints before activation. Use the catalog ID from the JSON inventory, with numeric port_N parameters and optional mix/input_db/output_db. Only locally scanned IDs are accepted. LADSPA latency is unknown and not compensated; native fixed-latency alignment remains active. See [graph contract and verification](docs/effect-graph.md) for limitations and schema.
 
@@ -160,7 +162,7 @@ Each LADSPA filter also exposes input gain and output gain (−24 to +24 dB) and
 
 ### Modulation
 
-The LADSPA filter includes a sine LFO (0.05–20 Hz) with adjustable depth and destination: wet/dry or output amplitude (tremolo). Wet/dry modulation adds the bipolar LFO to the base value and clamps to 0–1; output amplitude is multiplied by 1 + depth × sine. Destination/depth changes ramp over 10 ms, and all channels share the same sample-clocked phase. Disabling modulation leaves the unmodulated effect settings intact. The phase freezes when both modulation depths are zero and resets on a new effect instance. This is a reusable deterministic modulation core, not yet a general-purpose routing matrix or a Sight/Sound consumer.
+The LADSPA filter includes a sine LFO (0.05–20 Hz) with adjustable depth and destination: wet/dry or output amplitude (tremolo). Wet/dry modulation adds the bipolar LFO to the base value and clamps to 0–1; output amplitude is multiplied by 1 + depth × sine. Destination/depth changes ramp over 10 ms, and all channels share the same sample-clocked phase. Disabling modulation leaves the unmodulated effect settings intact. The phase freezes when both modulation depths are zero and resets on a new effect instance. This dedicated LFO is separate from the reactive routes, which can also consume Sight and Sound signals.
 
 ### Reactive parameter routing
 
@@ -193,7 +195,7 @@ Search accepts multiple words in any order, and the versioned JSON inventory inc
 
 ### Find and scan external effects
 
-In **HyperDSP LADSPA** properties, choose **Scan installed effects**, then **Reload catalog** when the scan finishes. Search and category filters are retained; scanning does not change the active effect. The in-process UI only reads the catalog; a separate Python 3 process probes each library with a three-second timeout. The scan is explicit because native libraries execute code during discovery and again when selected. This is process isolation, not a security sandbox.
+In **HyperDSP LADSPA** properties, choose **Scan installed effects**, then **Reload catalog** when the scan finishes. Search and category filters are retained; scanning does not change the active effect. A separate Python 3 scanner runs the native probe in a child process for each library, with a three-second timeout per probe. The scan is explicit because native libraries execute code during discovery and again when selected. This is process isolation, not a security sandbox.
 
 For more effects, the properties include package suggestions and links to external collections. On Mint/Ubuntu/Debian, search your normal package manager for these collections:
 

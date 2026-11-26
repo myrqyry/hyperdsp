@@ -1,1 +1,5 @@
 /build*/
+
+# meristem:local-ignore:start
+.meristem/local/
+# meristem:local-ignore:end

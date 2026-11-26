@@ -2,7 +2,23 @@
 
 Standalone deterministic audio effects and DSP plugin host for OBS. HyperDSP is the audio counterpart to HyperShader, not a Live Latent Lab submodule.
 
-## Ownership boundary (Mat, 2026-11-24)
+## Current architecture
+
+- `CMakeLists.txt` builds a C++20 OBS module. `src/plugin-main.cpp` registers the filters; `src/engines/` and `src/framework/` hold reusable DSP and processing infrastructure beneath the OBS adapters. Shared effect metadata feeds native selectors, graph parameter validation, and the effect library. See [README](../README.md) and the [effect library contract](../docs/effect-library.md).
+- The [effect graph](../docs/effect-graph.md) is a bounded, versioned serial/parallel graph with native effects, gain/weighted mixing, and locally cataloged LADSPA nodes. Prepare candidates off the real-time callback; reject invalid edits without displacing the accepted graph. Processing uses bounded, preallocated buffers. Alignment covers known fixed native latency, not arbitrary LADSPA latency or OBS-wide synchronization. LADSPA libraries execute trusted native code.
+- The optional Qt 6/OBS frontend in `src/ui/` provides the [Effect Builder](../docs/effect-builder.md) and [standalone live analysis](../docs/filter-analysis.md). Drafts are separate from applied audio and require explicit Apply. Standalone analysis covers Dynamics, Multiband, Dynamic EQ, and Transient; the last three have interactive controls. DSP-only builds retain processing without the GUI. [Clock Sync](../docs/clock-sync.md) is standalone because it changes frame counts and timestamps.
+- `src/interop/` consumes optional Sound confidence and Sight motion/hand data through versioned OBS procedures. See the [Sound](../docs/sound-interop.md) and [Sight](../docs/sight-interop.md) contracts. Keep producer access off the audio callback and preserve safe fallback when producers or fresh signals are unavailable.
+
+## Verification and project authorities
+
+- The [README](../README.md) owns build prerequisites and user workflows. On Linux, run `tests/verify.sh` for a fresh Debug CMake build and the configured CTest suite. `CMakeLists.txt` is the authority for test registration and feature gating, including optional Clock Sync and Qt tests. Use numerical DSP checks and real libobs capture for processing changes, and the Qt tests for frontend changes where enabled. Report desktop, hardware, listening, and real-time CPU qualification separately from automated results.
+- The topic documents under `docs/` own subsystem contracts and verification details. [Roadmap](../docs/roadmap.md) owns project direction and pending capabilities. The ownership decision below, topic documents, and Git history retain existing rationale and historical verification evidence; use the Meristem decision and learning logs for new entries when warranted.
+
+## Open structural uncertainty
+
+- The roadmap still calls for coordinated microphone DSP migration and installed OBS smoke tests. Repository build and test coverage do not establish the state of production OBS installations or live Sound/Sight deployments.
+
+## Ownership boundary (2026-11-24)
 
 - HyperDSP: conventional deterministic audio processing, programmable DSP, native audio effects and their controls.
 - HyperShader: conventional deterministic video processing and shaders.
@@ -14,7 +30,11 @@ HyperDSP and HyperShader can optionally consume signals from either Sight or Sou
 
 Use existing versioned OBS procedure interfaces and stable source UUIDs where applicable, rather than a new broker by default. Discover/read on the control or worker thread, publish bounded validated parameter snapshots to the audio callback; no model execution, blocking IPC, discovery or allocation in the callback. Keep missing input policy explicit per effect. Signal-driven processing is deterministic conditional on the audio and control inputs; this does not imply neural upstream results are reproducible.
 
-Current evidence: HyperShader already has an optional Sight client (src/interop/sight_client.h); Sound publishes versioned procedures documented in docs/sound-signal-interop-v1.md. HyperDSP has no signal client yet. Mic DSP is ported and verified in isolation and alongside YAMNet-only Sound; full migration and install remain outstanding.
+## Historical implementation and verification notes
+
+These entries describe successive milestones. Limitations and “next” items reflect their point in history and may be superseded by later entries or current source. Test results here are historical, not a fresh verification run.
+
+At the initial milestone, HyperShader had an optional Sight client and Sound published versioned procedures; HyperDSP had not yet added its own client. Mic DSP was ported and verified in isolation and alongside YAMNet-only Sound; full migration and install remained outstanding.
 
 First native host: LADSPA, verified against the installed SDK amplifier through actual libobs stereo capture, including stereo and duplicated mono instances, live parameter updates and dry failure. No neural dependencies. JSFX candidate YSFX was fetched for inspection only; Apache-2.0 vs inherited GPL-2.0 compatibility is unresolved.
 
