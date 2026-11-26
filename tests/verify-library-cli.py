@@ -7,10 +7,10 @@ cli, catalog = sys.argv[1:]
 def run(*args):
     return json.loads(subprocess.check_output([cli, "--catalog", catalog, "--json", *args], text=True))
 result=run()
-assert result["schema"]==1 and len(result["effects"])==44
-assert sum(e["format"]=="native" for e in result["effects"])==42
-assert len({e["id"] for e in result["effects"]})==44
-assert sum(e["graph_supported"] for e in result["effects"])==44
+assert result["schema"]==1 and len(result["effects"])==45
+assert sum(e["format"]=="native" for e in result["effects"])==43
+assert len({e["id"] for e in result["effects"]})==45
+assert sum(e["graph_supported"] for e in result["effects"])==45
 color=next(e for e in result["effects"] if e["id"]=="native:hyperdsp_color_filter:3")
 params={p["key"]:p for p in color["parameters"]}
 assert params["drive"]["min"]==-24 and params["drive"]["max"]==36 and params["drive"]["default"]==0
@@ -24,6 +24,8 @@ transient=next(e for e in result["effects"] if e["source"]=="hyperdsp_transient_
 assert len(transient["parameters"])==7 and all(p["bindable"] for p in transient["parameters"])
 band=next(e for e in result["effects"] if e["id"]=="native:hyperdsp_transient_filter:2")
 bt={p["key"]:p for p in band["parameters"]}
+eq=next(e for e in result["effects"] if e["source"]=="hyperdsp_dynamic_eq_filter")
+assert len(eq["parameters"])==11 and all(p["bindable"] for p in eq["parameters"])
 assert len(bt)==13 and not bt["low_hz"]["bindable"] and not bt["high_hz"]["bindable"]
 assert bt["low_attack_db"]["bindable"] and "attack_db" not in bt
 assert len(mb)==17 and not mb["low_hz"]["bindable"] and mb["low_ratio"]["bindable"]
@@ -52,9 +54,9 @@ with tempfile.TemporaryDirectory() as temp:
     data["effects"].append(data["effects"][0])
     path.write_text(json.dumps(data))
     stale=json.loads(subprocess.check_output([cli,"--catalog",str(path),"--json"],text=True))
-    assert len(stale["effects"])==44
+    assert len(stale["effects"])==45
     assert sum(not e["compatible"] for e in stale["effects"])==1
     missing=json.loads(subprocess.check_output([cli,"--catalog",str(Path(temp)/"absent.json"),"--json"],text=True))
-    assert len(missing["effects"])==42
+    assert len(missing["effects"])==43
 assert subprocess.run([cli,"--channels","0"],capture_output=True).returncode==2
 print("LIBRARY_CLI_PASS=1")

@@ -482,7 +482,7 @@ int main(int argc,char** argv){
             }
             tabs->setCurrentIndex(7);name->setText("Local example");QTest::mouseClick(save,Qt::LeftButton);
             int row=-1;for(int i=0;i<list->count();++i)if(list->item(i)->text().contains("Local example"))row=i;
-            persisted=persisted&&row>=0&&list->count()>=11;
+            persisted=persisted&&row>=0&&list->count()>=12;
             QTest::mouseClick(fresh,Qt::LeftButton);
             persisted=persisted&&editor.draft().value("nodes").toArray().isEmpty();
             QTest::mouseClick(previous,Qt::LeftButton);

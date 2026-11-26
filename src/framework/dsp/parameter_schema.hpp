@@ -10,6 +10,7 @@
 #include "stereo.hpp"
 #include "transient.hpp"
 #include "band_transient.hpp"
+#include "dynamic_eq.hpp"
 #include <map>
 #include <string>
 #include <string_view>
@@ -63,6 +64,18 @@ inline constexpr FloatParameter<DynamicsSettings> dynamics_parameters[]={
     {"input_db","Input gain",-24,24,.1," dB",&DynamicsSettings::input_db},
     {"mix","Wet / dry",0,1,.01,"",&DynamicsSettings::wet},
     {"output_db","Output gain",-24,24,.1," dB",&DynamicsSettings::output_db}};
+inline constexpr FloatParameter<DynamicEqSettings> dynamic_eq_parameters[]={
+    {"frequency","Center frequency",20,20000,1," Hz",&DynamicEqSettings::frequency},
+    {"q","Bandwidth (Q)",.25,12,.01,"",&DynamicEqSettings::q},
+    {"threshold","Detector threshold",-80,0,.1," dBFS",&DynamicEqSettings::threshold},
+    {"ratio","Ratio",1,20,.1,":1",&DynamicEqSettings::ratio},
+    {"range_db","Dynamic gain limit",-24,12,.1," dB",&DynamicEqSettings::range_db},
+    {"knee","Soft knee",0,24,.1," dB",&DynamicEqSettings::knee},
+    {"attack_ms","Attack",.1,200,.1," ms",&DynamicEqSettings::attack_ms},
+    {"release_ms","Release",5,2000,1," ms",&DynamicEqSettings::release_ms},
+    {"input_db","Input gain",-24,24,.1," dB",&DynamicEqSettings::input_db},
+    {"mix","Wet / dry",0,1,.01,"",&DynamicEqSettings::wet},
+    {"output_db","Output gain",-24,24,.1," dB",&DynamicEqSettings::output_db}};
 inline constexpr FloatParameter<TransientSettings> transient_parameters[]={
     {"attack_db","Attack gain",-12,12,.1," dB",&TransientSettings::attack_db},
     {"sustain_db","Sustain gain",-12,12,.1," dB",&TransientSettings::sustain_db},

@@ -50,7 +50,7 @@ class PreparedGraph {
         }
     };
     struct Node {
-        std::variant<GainNode,std::unique_ptr<Color>,std::unique_ptr<Spectral>,std::unique_ptr<NativeFilter>,std::unique_ptr<Dynamics>,std::unique_ptr<Multiband>,std::unique_ptr<Stereo>,std::unique_ptr<Transient>,std::unique_ptr<BandTransient>,std::unique_ptr<TimeEffect>,std::unique_ptr<Space>,std::unique_ptr<Formant>,std::unique_ptr<MicNode>,std::unique_ptr<LadspaEngine>> engine{GainNode{}};
+        std::variant<GainNode,std::unique_ptr<Color>,std::unique_ptr<Spectral>,std::unique_ptr<NativeFilter>,std::unique_ptr<Dynamics>,std::unique_ptr<Multiband>,std::unique_ptr<Stereo>,std::unique_ptr<Transient>,std::unique_ptr<BandTransient>,std::unique_ptr<DynamicEq>,std::unique_ptr<TimeEffect>,std::unique_ptr<Space>,std::unique_ptr<Formant>,std::unique_ptr<MicNode>,std::unique_ptr<LadspaEngine>> engine{GainNode{}};
         std::function<void(const Values&)> apply;
         std::vector<Edge> inputs;
         std::vector<float> audio;
@@ -219,6 +219,12 @@ public:
                 for(auto& [k,v]:spec.params)if(!assign_parameter(settings,dynamics_parameters,k,v))return fail("Invalid Dynamics parameter: "+k);
                 auto engine=std::make_unique<Dynamics>();
                 if(!bind_native(n,engine.get(),settings,dynamics_parameters,mappings[i],g->values_))return fail("Invalid continuous parameter binding: "+spec.effect);
+                engine->reset(rate,settings);n.engine=std::move(engine);
+            }else if(mode(spec.effect,"native:hyperdsp_dynamic_eq_filter:",m,1)){
+                DynamicEqSettings settings;
+                for(auto& [k,v]:spec.params)if(!assign_parameter(settings,dynamic_eq_parameters,k,v))return fail("Invalid Dynamic EQ parameter: "+k);
+                auto engine=std::make_unique<DynamicEq>();
+                if(!bind_native(n,engine.get(),settings,dynamic_eq_parameters,mappings[i],g->values_))return fail("Invalid Dynamic EQ binding");
                 engine->reset(rate,settings);n.engine=std::move(engine);
             }else if(mode(spec.effect,"native:hyperdsp_transient_filter:",m,2)){
                 if(m==1){

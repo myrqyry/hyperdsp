@@ -1,10 +1,11 @@
 # Bundled graph presets
 
-Load from the Effect Builder's Presets tab, or import the plain graph JSON in examples/graphs. These are editable native effect chains, not external plugins. They use exposed normalized macros, including coordinated multi-parameter mappings. Audition first, adjust for the source, then select a target and Apply. The eight new presets end with a full-wet sample-peak limiter at -2 or -3 dBFS; this is not a true-peak limiter or a loudness normalization guarantee.
+Load from the Effect Builder's Presets tab, or import the plain graph JSON in examples/graphs. These are editable native effect chains, not external plugins. They use exposed normalized macros, including coordinated multi-parameter mappings. Audition first, adjust for the source, then select a target and Apply. Nine of the presets end with a full-wet sample-peak limiter at -2 or -3 dBFS; this is not a true-peak limiter or a loudness normalization guarantee.
 
 | Preset | Processing and intended use | Exposed controls |
 | --- | --- | --- |
 | Voice Foundation | High-pass, downward expander, presence EQ, compressor, limiter; starting point for speech, not ML noise removal | Room cleanup, Presence, Leveling |
+| Vocal De Esser | Frequency-selective attenuation and limiter; starts at 6.5 kHz | De-ess depth, Sensitivity, Sibilance frequency |
 | Parallel Punch | Compressed/saturated branch mixed with dry audio; latency-aligned graph summation and limiter | Punch, Output trim |
 | Radio Transmission | Variable band limits, midrange presence, soft clipping and limiter | Bandwidth, Grit |
 | Tape Echo | Saturation, high-shelf roll-off, ping-pong delay and limiter | Tape age, Echo, Delay time |
@@ -15,7 +16,7 @@ Load from the Effect Builder's Presets tab, or import the plain graph JSON in ex
 | Parallel Color | Existing parallel saturation example | Color |
 | Vowel Space | Existing vowel morph and reverb example | Vowel, Space |
 
-Voice Foundation's expander requires appropriately set thresholds and release time; sustained background sound may not be attenuated. Spectral Dream is an artistic effect with 1024 samples of known algorithmic latency, not a voice-restoration tool. Tape Echo's time changes can move pitch during adjustment. The three reactive presets use local envelope, LFO or treble-band analysis, with no dependency on Sight/Sound or LADSPA.
+Vocal De Esser is a threshold-based dynamic band cut, not speech recognition. Tune its 4–9 kHz frequency control and threshold to the voice and input level; it can also react to other loud sounds in that band. Voice Foundation's expander requires appropriately set thresholds and release time; sustained background sound may not be attenuated. Spectral Dream is an artistic effect with 1024 samples of known algorithmic latency, not a voice-restoration tool. Tape Echo's time changes can move pitch during adjustment. The three reactive presets use local envelope, LFO or treble-band analysis, with no dependency on Sight/Sound or LADSPA.
 
 ## Verification
 

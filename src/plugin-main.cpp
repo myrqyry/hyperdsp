@@ -12,6 +12,7 @@ extern "C" struct obs_source_info dynamics_filter;
 extern "C" struct obs_source_info multiband_filter;
 extern "C" struct obs_source_info stereo_filter;
 extern "C" struct obs_source_info transient_filter;
+extern "C" struct obs_source_info dynamic_eq_filter;
 extern "C" struct obs_source_info color_filter;
 extern "C" struct obs_source_info time_filter;
 extern "C" struct obs_source_info space_filter;
@@ -33,6 +34,7 @@ bool obs_module_load(void)
     obs_register_source(&multiband_filter);
     obs_register_source(&stereo_filter);
     obs_register_source(&transient_filter);
+    obs_register_source(&dynamic_eq_filter);
     obs_register_source(&color_filter);
     obs_register_source(&time_filter);
     obs_register_source(&space_filter);

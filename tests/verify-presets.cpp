@@ -23,7 +23,7 @@ int main(int argc,char** argv){
     auto* source=obs_source_create("preset_test_source","Preset test",nullptr,nullptr);
     auto* filter=obs_source_create_private("hyperdsp_graph_filter","Graph",nullptr);
     obs_source_filter_add(source,filter);
-    std::set<std::string> expected={"parallel-color","vowel-space","voice-foundation","parallel-punch","radio-transmission","tape-echo","envelope-wah","rhythmic-pulse","spectral-dream","stereo-chorus"};
+    std::set<std::string> expected={"parallel-color","vowel-space","voice-foundation","parallel-punch","radio-transmission","tape-echo","envelope-wah","rhythmic-pulse","spectral-dream","stereo-chorus","vocal-de-esser"};
     bool ok=true;unsigned files=0;
     for(auto& entry:std::filesystem::directory_iterator(std::string(argv[2])+"/examples/graphs")){
         if(entry.path().extension()!=".json")continue;

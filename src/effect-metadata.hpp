@@ -55,6 +55,8 @@ inline void graph_metadata(obs_data_t* item,const hyperdsp::EffectEntry& e,unsig
         choice_parameter(params,"alignment","Response",0,alignment_choices);
     }else if(e.source=="hyperdsp_dynamics_filter"){
         parameter_list(params,DynamicsSettings{},dynamics_parameters);
+    }else if(e.source=="hyperdsp_dynamic_eq_filter"){
+        parameter_list(params,DynamicEqSettings{},dynamic_eq_parameters);
     }else if(e.source=="hyperdsp_transient_filter"){
         if(e.mode==2){
             BandTransientSettings settings;

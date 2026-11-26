@@ -73,6 +73,8 @@ Standalone conventional audio effects and hosting for OBS, with optional inputs 
 
 - Three-band transient mode with six independent contour gains, shared phase-matched crossover/processing bank, graph macros and native mode-aware properties.
 
+- Frequency-selective Dynamic EQ / de-essing, linked peak detection, signed dynamic gain, eleven graph-bindable parameters and a qualified Vocal De Esser preset.
+
 ## Next layers
 
 - Unified discoverable effect library: favorites, native/installed external/community definitions, backend compatibility, descriptions, safe explicit acquisition and reusable presets. Reset/import/export and a compact native frequency-response view.

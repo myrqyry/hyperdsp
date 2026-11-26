@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "nodes": [
+    {
+      "effect": "native:hyperdsp_dynamic_eq_filter:1",
+      "params": {"frequency": 6500, "q": 2, "threshold": -30, "ratio": 4, "range_db": -9, "attack_ms": 2, "release_ms": 80},
+      "inputs": [{"source": -1, "weight": 1}]
+    },
+    {
+      "effect": "native:hyperdsp_dynamics_filter:4",
+      "params": {"threshold": -2},
+      "inputs": [{"source": 0, "weight": 1}]
+    }
+  ],
+  "output": 1,
+  "controls": [
+    {"id": "de_depth", "name": "De-ess depth", "default": 0.5, "bindings": [{"node": 0, "parameter": "range_db", "low": 0, "high": -18}]},
+    {"id": "de_sensitivity", "name": "Sensitivity", "default": 0.5, "bindings": [{"node": 0, "parameter": "threshold", "low": -18, "high": -42}]},
+    {"id": "de_frequency", "name": "Sibilance frequency", "default": 0.5, "bindings": [{"node": 0, "parameter": "frequency", "low": 4000, "high": 9000}]}
+  ]
+}
