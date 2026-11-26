@@ -321,6 +321,8 @@ public:
         return true;
     }
     const std::vector<GraphControl>& controls()const{return controls_;}
+    double base_value(unsigned i)const{return i<controls_.size()?values_[i]:0;}
+    double effective_value(unsigned i)const{return i<controls_.size()?effective_[i]:0;}
     Parameters base_values()const{
         Parameters result;
         for(unsigned i=0;i<controls_.size();++i)result.emplace(controls_[i].id,values_[i]);

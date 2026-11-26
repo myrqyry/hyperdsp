@@ -55,6 +55,8 @@ Standalone conventional audio effects and hosting for OBS, with optional inputs 
 
 - Theme-inheriting Modulation tab for all ten graph reactive sources, shared external channel discovery, signed macro routing and validated explicit application. Qt interaction and narrow-layout checks.
 
+- Live applied-graph Monitor: channel-1 input/output waveforms, log-frequency FFT magnitude, peak dBFS and base/effective macro readouts, demand-leased bounded audio snapshots; actual libobs and widget verification.
+
 ## Next layers
 
 - Unified discoverable effect library: favorites, native/installed external/community definitions, backend compatibility, descriptions, safe explicit acquisition and reusable presets. Reset/import/export and a compact native frequency-response view.

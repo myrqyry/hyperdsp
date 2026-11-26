@@ -20,6 +20,9 @@
 #include <QJsonDocument>
 #include <obs-module.h>
 #include <cstdio>
+#include <util/platform.h>
+#include <numbers>
+#include "framework/dsp/graph_monitor.hpp"
 #include "sound-signal-fixture.hpp"
 #include "sight-signal-fixture.hpp"
 static obs_module_t* loaded_module=nullptr;
@@ -307,6 +310,32 @@ int main(int argc,char** argv){
                 builder.resize(previousSize);QTest::qWait(50);
             }
             std::printf("BUILDER_ROUTES_PASS=%d\n",routes);ok=ok&&routes;
+            auto* meter=builder.findChild<QWidget*>("graphMonitor");
+            auto* monitorStatus=builder.findChild<QLabel*>("monitorStatus");
+            bool monitored=meter&&monitorStatus;
+            if(monitored){
+                builder.setDraft(QJsonDocument::fromJson(R"({"schema":1,"nodes":[{"effect":"gain","params":{"gain_db":-6},"inputs":[{"source":-1,"weight":1}]}],"output":0})").object());
+                QTest::mouseClick(apply,Qt::LeftButton);tabs->setCurrentIndex(4);QTest::qWait(100);
+                std::array<float,480> l{},r{};uint64_t start=os_gettime_ns();
+                for(unsigned k=0;k<10;++k){
+                    for(unsigned j=0;j<480;++j){l[j]=.4f*std::sin(2*std::numbers::pi*(k*480+j)*1500/48000);r[j]=-l[j];}
+                    obs_source_audio a{};a.data[0]=(uint8_t*)l.data();a.data[1]=(uint8_t*)r.data();
+                    a.frames=480;a.speakers=SPEAKERS_STEREO;a.format=AUDIO_FORMAT_FLOAT_PLANAR;a.samples_per_sec=48000;
+                    a.timestamp=start+k*10000000ULL;obs_source_output_audio(source,&a);QTest::qWait(10);
+                }
+                QTest::qWait(80);
+                monitored=monitored&&monitorStatus->text().startsWith("Live")&&meter->property("hasFrame").toBool();
+                if(qEnvironmentVariableIsSet("HYPERDSP_BUILDER_SCREENSHOT"))
+                    builder.grab().save(qEnvironmentVariable("HYPERDSP_BUILDER_SCREENSHOT")+".monitor.png");
+                auto oldSize=builder.size();builder.resize(420,640);QTest::qWait(40);
+                if(qEnvironmentVariableIsSet("HYPERDSP_BUILDER_SCREENSHOT"))
+                    builder.grab().save(qEnvironmentVariable("HYPERDSP_BUILDER_SCREENSHOT")+".monitor-narrow.png");
+                builder.resize(oldSize);
+                QTest::qWait(600);
+                monitored=monitored&&!meter->property("hasFrame").toBool()&&monitorStatus->text().contains("Waiting");
+                tabs->setCurrentIndex(3);
+            }
+            std::printf("BUILDER_MONITOR_PASS=%d\n",monitored);ok=ok&&monitored;
             QTest::qWait(80);
             if(qEnvironmentVariableIsSet("HYPERDSP_BUILDER_SCREENSHOT"))builder.grab().save(qEnvironmentVariable("HYPERDSP_BUILDER_SCREENSHOT"));
         }

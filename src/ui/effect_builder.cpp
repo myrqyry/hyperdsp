@@ -1,5 +1,9 @@
 #include "effect_builder.hpp"
 #include "effect-metadata.hpp"
+#include "framework/dsp/monitor_spectrum.hpp"
+#include <QPaintEvent>
+#include <QShowEvent>
+#include <QHideEvent>
 #include "interop/external_inputs.hpp"
 #include <QStandardItemModel>
 #include <obs-module.h>
@@ -48,6 +52,7 @@
 #include <QTabWidget>
 #include <QUuid>
 #include <cmath>
+#include <cstring>
 #include <jansson.h>
 namespace hyperdsp {
 namespace {
@@ -87,6 +92,105 @@ struct GraphColors {
         terminal=blend(base,accent,.16);native=blend(base,p.color(QPalette::Button),.65);
         external=blend(base,p.color(QPalette::Link),.12);
     }
+};
+class MonitorPlot final:public QWidget {
+public:
+    GraphMonitorFrame frame{};
+    MonitorSpectrum analyzer;
+    MonitorSpectrum::Bins input{},output{};
+    bool valid=false;
+    explicit MonitorPlot(QWidget* parent):QWidget(parent){setMinimumHeight(200);setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Expanding);}
+    void setFrame(const GraphMonitorFrame& next){
+        if(!valid||frame.sequence!=next.sequence||frame.epoch!=next.epoch){
+            frame=next;input=analyzer.analyze(frame.input);output=analyzer.analyze(frame.output);
+        }
+        valid=true;update();
+    }
+    void clear(){valid=false;update();}
+protected:
+    void paintEvent(QPaintEvent*)override{
+        QPainter p(this);p.setRenderHint(QPainter::Antialiasing);
+        GraphColors colors(palette());
+        QColor in=readable(palette().color(QPalette::Link),colors.base,colors.text,3);
+        QColor out=colors.accent;
+        p.fillRect(rect(),colors.base);p.setPen(colors.text);
+        const int left=43,right=9,top=23,bottom=19;
+        const double w=width()-left-right,h=(height()-2*(top+bottom))/2.;
+        if(w<20||h<20)return;
+        QRectF wave(left,top,w,h),spectrum(left,top+bottom+h+top,w,h);
+        auto line=[&](QRectF area,double y){p.setPen(QPen(blend(colors.base,colors.text,.19),1));p.drawLine(QPointF(area.left(),y),QPointF(area.right(),y));};
+        auto label=[&](QRectF area,QString text){p.setPen(colors.text);p.drawText(QRectF(4,area.top()-20,width()-8,18),Qt::AlignLeft|Qt::AlignVCenter,text);};
+        label(wave,valid?QString("Waveform · channel 1 · %1 ms").arg(1000.*monitor_samples/frame.rate,0,'f',1):QString("Waveform · channel 1"));label(spectrum,"Spectrum · dBFS peak amplitude");
+        for(double value:{1.,0.,-1.}){
+            double y=wave.center().y()-value*wave.height()/2;line(wave,y);
+            p.setPen(colors.text);p.drawText(QRectF(1,y-8,left-5,16),Qt::AlignRight|Qt::AlignVCenter,QString::number(value));
+        }
+        for(int db:{0,-30,-60,-90}){
+            double y=spectrum.top()+(-db/90.)*h;line(spectrum,y);
+            p.setPen(colors.text);p.drawText(QRectF(1,y-8,left-5,16),Qt::AlignRight|Qt::AlignVCenter,QString::number(db));
+        }
+        if(!valid){
+            p.setPen(colors.text);p.drawText(wave,Qt::AlignCenter,"Waiting for audio");return;
+        }
+        auto wavePath=[&](const auto& samples,QColor color,Qt::PenStyle style){
+            QPainterPath path;
+            for(unsigned i=0;i<samples.size();++i){
+                QPointF point(wave.left()+w*i/(samples.size()-1),wave.center().y()-std::clamp(samples[i],-1.f,1.f)*h/2);
+                if(!i)path.moveTo(point);else path.lineTo(point);
+            }
+            p.save();p.setClipRect(wave);p.setPen(QPen(color,1.4,style));p.drawPath(path);p.restore();
+        };
+        wavePath(frame.input,in,Qt::DashLine);wavePath(frame.output,out,Qt::SolidLine);
+        const double low=std::max(20.,double(frame.rate)/monitor_samples),high=frame.rate/2.;
+        auto x=[&](double hz){return spectrum.left()+w*std::log(hz/low)/std::log(high/low);};
+        for(double hz:{100.,1000.,10000.})if(hz>low&&hz<high){
+            double xx=x(hz);p.setPen(QPen(blend(colors.base,colors.text,.19),1));p.drawLine(QPointF(xx,spectrum.top()),QPointF(xx,spectrum.bottom()));
+            p.setPen(colors.text);p.drawText(QRectF(xx-20,spectrum.bottom()+1,40,16),Qt::AlignHCenter,hz>=1000?QString::number(hz/1000)+"k":QString::number(hz));
+        }
+        auto spectrumPath=[&](const auto& bins,QColor color,Qt::PenStyle style){
+            QPainterPath path;bool first=true;
+            for(unsigned i=1;i<bins.size();++i){
+                double hz=double(i)*frame.rate/monitor_samples;if(hz<low)continue;
+                QPointF point(x(hz),spectrum.top()+h*(-std::clamp(bins[i],-90.f,0.f)/90.));
+                if(first){path.moveTo(point);first=false;}else path.lineTo(point);
+            }
+            p.save();p.setClipRect(spectrum);p.setPen(QPen(color,1.5,style));p.drawPath(path);p.restore();
+        };
+        spectrumPath(input,in,Qt::DashLine);spectrumPath(output,out,Qt::SolidLine);
+    }
+};
+class MonitorPanel final:public QWidget {
+    MonitorPlot* plot_;
+    QLabel *status_,*controls_;
+    QTimer timer_;
+    std::function<bool(GraphMonitorFrame&)> read_;
+public:
+    MonitorPanel(std::function<bool(GraphMonitorFrame&)> read,QWidget* parent=nullptr):QWidget(parent),read_(std::move(read)){
+        setObjectName("graphMonitor");setProperty("hasFrame",false);
+        auto* layout=new QVBoxLayout(this);layout->setContentsMargins(3,3,3,3);layout->setSpacing(3);
+        status_=new QLabel("Waiting for applied graph audio");status_->setObjectName("monitorStatus");status_->setTextFormat(Qt::PlainText);status_->setWordWrap(true);
+        layout->addWidget(status_);plot_=new MonitorPlot(this);layout->addWidget(plot_,1);
+        auto* legend=new QLabel("Input — dashed   Output — solid · applied graph, not draft");legend->setWordWrap(true);layout->addWidget(legend);
+        controls_=new QLabel;controls_->setTextFormat(Qt::PlainText);controls_->setWordWrap(true);layout->addWidget(controls_);
+        timer_.setInterval(50);connect(&timer_,&QTimer::timeout,this,[this]{poll();});
+    }
+    void reset(){
+        plot_->clear();setProperty("hasFrame",false);status_->setText("Waiting for applied graph audio");controls_->clear();
+    }
+    void poll(){
+        GraphMonitorFrame frame{};
+        if(!read_(frame)||frame.rate<8000||frame.rate>192000||frame.control_count>8){reset();return;}
+        if(plot_->valid&&plot_->frame.sequence==frame.sequence&&plot_->frame.epoch==frame.epoch)return;
+        plot_->setFrame(frame);setProperty("hasFrame",true);
+        auto peak=[](const auto& samples){float max=0;for(float v:samples)max=std::max(max,std::abs(v));return 20*std::log10(std::max(max,1e-6f));};
+        status_->setText(QString("Live · %1 kHz · Ch 1 peak: in %2 / out %3 dBFS").arg(frame.rate/1000.,0,'g',4).arg(peak(frame.input),0,'f',1).arg(peak(frame.output),0,'f',1));
+        QStringList values;
+        for(unsigned i=0;i<frame.control_count;++i){auto& c=frame.controls[i];values<<QString("%1: %2 → %3").arg(QString::fromUtf8(c.name.data(),strnlen(c.name.data(),c.name.size()))).arg(c.base,0,'f',2).arg(c.effective,0,'f',2);}
+        controls_->setText(values.isEmpty()?QString():QString("Controls · base → effective\n")+values.join("   |   "));
+    }
+protected:
+    void showEvent(QShowEvent* event)override{QWidget::showEvent(event);poll();timer_.start();}
+    void hideEvent(QHideEvent* event)override{timer_.stop();reset();QWidget::hideEvent(event);}
 };
 // Scene item identities are UI-only; the DSP graph still uses schema-1 indices.
 constexpr int input_id=-1,output_id=-2;
@@ -316,6 +420,15 @@ EffectBuilder::EffectBuilder(QWidget* parent):QWidget(parent),draft_(empty()){
     connect(addBinding_,&QPushButton::clicked,this,[this]{addBinding();});
     connect(removeBinding_,&QPushButton::clicked,this,[this]{removeBinding();});
     tabs->addTab(makeRoutePanel(),"Modulation");
+    auto* monitor=new MonitorPanel([this](GraphMonitorFrame& frame){
+        auto* source=find_target(target_);if(!source)return false;
+        calldata_t d;calldata_init(&d);calldata_set_ptr(&d,"frame",&frame);
+        bool ready=proc_handler_call(obs_source_get_proc_handler(source),"hyperdsp_graph_monitor_v1",&d)&&calldata_bool(&d,"available");
+        calldata_free(&d);obs_source_release(source);return ready;
+    });
+    tabs->addTab(monitor,"Monitor");
+    connect(target_,&QComboBox::currentIndexChanged,monitor,[monitor]{monitor->reset();if(monitor->isVisible())monitor->poll();});
+
     connect(tabs,&QTabWidget::currentChanged,this,[this](int index){if(index==3)refreshRoutes();});
     split->addWidget(tabs);split->setStretchFactor(0,1);split->setStretchFactor(1,1);root->addWidget(split,1);
     status_=new QLabel;status_->setTextFormat(Qt::PlainText);status_->setWordWrap(true);root->addWidget(status_);
