@@ -53,6 +53,8 @@ Standalone conventional audio effects and hosting for OBS, with optional inputs 
 
 - Standalone adaptive Clock Sync utility with bounded correction, variable-frame resampling, timestamp continuity, diagnostics and synthetic-drift/real-libobs filter-chain tests.
 
+- Theme-inheriting Modulation tab for all ten graph reactive sources, shared external channel discovery, signed macro routing and validated explicit application. Qt interaction and narrow-layout checks.
+
 ## Next layers
 
 - Unified discoverable effect library: favorites, native/installed external/community definitions, backend compatibility, descriptions, safe explicit acquisition and reusable presets. Reset/import/export and a compact native frequency-response view.

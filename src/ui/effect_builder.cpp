@@ -1,5 +1,7 @@
 #include "effect_builder.hpp"
 #include "effect-metadata.hpp"
+#include "interop/external_inputs.hpp"
+#include <QStandardItemModel>
 #include <obs-module.h>
 #include <obs-frontend-api.h>
 #include <QApplication>
@@ -308,11 +310,13 @@ EffectBuilder::EffectBuilder(QWidget* parent):QWidget(parent),draft_(empty()){
     connect(macroName_,&QLineEdit::editingFinished,this,[this]{
         auto name=macroName_->text().trimmed();
         if(name.isEmpty()||name.toUtf8().size()>80){message("Control name must be 1–80 UTF-8 bytes.",true);inspectMacro();return;}
-        changeMacro("name",name);if(macros_->currentIndex()>=0)macros_->setItemText(macros_->currentIndex(),name);
+        changeMacro("name",name);if(macros_->currentIndex()>=0)macros_->setItemText(macros_->currentIndex(),name);refreshRoutes();
     });
     connect(macroDefault_,&QDoubleSpinBox::valueChanged,this,[this](double v){changeMacro("default",v);});
     connect(addBinding_,&QPushButton::clicked,this,[this]{addBinding();});
     connect(removeBinding_,&QPushButton::clicked,this,[this]{removeBinding();});
+    tabs->addTab(makeRoutePanel(),"Modulation");
+    connect(tabs,&QTabWidget::currentChanged,this,[this](int index){if(index==3)refreshRoutes();});
     split->addWidget(tabs);split->setStretchFactor(0,1);split->setStretchFactor(1,1);root->addWidget(split,1);
     status_=new QLabel;status_->setTextFormat(Qt::PlainText);status_->setWordWrap(true);root->addWidget(status_);
     connect(refresh,&QPushButton::clicked,this,[this]{refreshTargets();});
@@ -610,7 +614,7 @@ void EffectBuilder::refreshMacros(){
         }
         int index=macros_->findData(old);if(index>=0)macros_->setCurrentIndex(index);
     }
-    inspectMacro();
+    inspectMacro();refreshRoutes();
 }
 void EffectBuilder::changeMacro(const QString& key,const QJsonValue& value){
     auto controls=draft_.value("controls").toArray();int index=macros_->currentIndex();
@@ -678,7 +682,7 @@ void EffectBuilder::removeMacro(){
     auto controls=draft_.value("controls").toArray();int i=macros_->currentIndex();if(i<0||i>=controls.size())return;
     auto id=controls[i].toObject().value("id");
     for(auto route:draft_.value("routes").toArray())if(route.toObject().value("control")==id){
-        message("This control has a modulation route. Remove the route from the graph definition first.",true);return;
+        message("This control has a modulation route. Remove the route in Modulation first.",true);return;
     }
     controls.removeAt(i);draft_["controls"]=controls;refreshMacros();message("Control removed from draft.");
 }
@@ -695,6 +699,145 @@ void EffectBuilder::removeBinding(){
     auto controls=draft_.value("controls").toArray();int i=macros_->currentIndex();if(i<0||i>=controls.size())return;
     auto bindings=controls[i].toObject().value("bindings").toArray();int row=macroBindings_->currentRow();
     if(row<0||row>=bindings.size())return;bindings.removeAt(row);changeMacro("bindings",bindings);inspectMacro();
+}
+namespace {
+constexpr const char* routeSources[]={"","LFO","Input envelope","Bass energy","Mid energy","Treble energy",
+    "Sound category confidence","Sight motion energy","Sight hand X","Sight hand Y","Sight pinch closeness"};
+QString routeSourceName(int id){return id>=1&&id<=10?QString::fromUtf8(routeSources[id]):QString("Unknown source (%1)").arg(id);}
+int channelDomain(int source){return source==6?6:source==7?7:source>=8&&source<=10?8:0;}
+}
+QWidget* EffectBuilder::makeRoutePanel(){
+    auto* panel=new QWidget;auto* layout=new QVBoxLayout(panel);layout->setContentsMargins(3,3,3,3);layout->setSpacing(4);
+    auto* row=new QHBoxLayout;routeList_=new QComboBox;routeList_->setObjectName("routeList");
+    routeList_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);routeList_->setMinimumContentsLength(12);
+    addRoute_=button("+ Route","addRoute",panel);removeRoute_=button("Remove","removeRoute",panel);
+    row->addWidget(routeList_,1);row->addWidget(addRoute_);row->addWidget(removeRoute_);layout->addLayout(row);
+    auto* scroll=new QScrollArea;scroll->setWidgetResizable(true);scroll->setFrameShape(QFrame::NoFrame);
+    auto* content=new QWidget;routeForm_=new QVBoxLayout(content);routeForm_->setContentsMargins(4,3,4,3);routeForm_->setSpacing(4);
+    auto field=[&](const char* label,QWidget* widget){
+        auto* line=new QWidget;auto* row=new QHBoxLayout(line);row->setContentsMargins(0,0,0,0);
+        auto* text=new QLabel(label);text->setMinimumWidth(100);text->setBuddy(widget);
+        row->addWidget(text);row->addWidget(widget,1);routeForm_->addWidget(line);routeRows_[widget]=line;
+    };
+    auto combo=[&](const char* id,const char* label){
+        auto* c=new QComboBox;c->setObjectName(id);c->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);c->setMinimumContentsLength(12);
+        field(label,c);return c;
+    };
+    auto spin=[&](const char* id,const char* label,double lo,double hi,double step,int decimals,const char* suffix=""){
+        auto* s=new QDoubleSpinBox;s->setObjectName(id);s->setDecimals(decimals);s->setRange(lo,hi);s->setSingleStep(step);s->setSuffix(suffix);
+        field(label,s);return s;
+    };
+    routeSource_=combo("routeSource","Source");
+    for(int i=1;i<=10;++i)routeSource_->addItem(routeSourceName(i),i);
+    routeTarget_=combo("routeTarget","Control");
+    routeAmount_=spin("routeAmount","Amount",-1,1,.05,3);
+    routeAmount_->setToolTip("Signed contribution to the normalized macro. Added to its manual base, then clamped to 0–1.");
+    routeShape_=combo("routeShape","Waveform");
+    for(const auto* shape:{"Sine","Triangle","Square","Saw"})routeShape_->addItem(shape,routeShape_->count());
+    routeRate_=spin("routeRate","Rate",.05,20,.05,2," Hz");
+    routeAttack_=spin("routeAttack","Attack",1,200,1,1," ms");
+    routeRelease_=spin("routeRelease","Release",10,2000,10,1," ms");
+    routeSensitivity_=spin("routeSensitivity","Band sensitivity",-24,24,.1,1," dB");
+    routeChannel_=combo("routeChannel","Input channel");
+    refreshChannels_=button("Refresh inputs","refreshRouteChannels",panel);routeForm_->addWidget(refreshChannels_);routeRows_[refreshChannels_]=refreshChannels_;
+    routeCategory_=new QLineEdit;routeCategory_->setObjectName("routeCategory");routeCategory_->setPlaceholderText("Exact label, e.g. Speech");routeCategory_->setMaxLength(256);
+    field("Sound category",routeCategory_);routeForm_->addStretch(1);
+    scroll->setWidget(content);layout->addWidget(scroll,1);
+    auto* hint=new QLabel("Routes add to exposed controls. Missing external signals fall back to the manual value. Apply to activate.");
+    hint->setWordWrap(true);layout->addWidget(hint);
+    connect(routeList_,&QComboBox::currentIndexChanged,this,[this]{inspectRoute();});
+    connect(addRoute_,&QPushButton::clicked,this,[this]{addRoute();});
+    connect(removeRoute_,&QPushButton::clicked,this,[this]{removeRoute();});
+    connect(refreshChannels_,&QPushButton::clicked,this,[this]{refreshRouteChannels();});
+    connect(routeSource_,&QComboBox::currentIndexChanged,this,[this]{
+        int i=routeList_->currentIndex();auto routes=draft_.value("routes").toArray();
+        if(i<0||i>=routes.size()||routeSource_->currentIndex()<0)return;
+        auto r=routes[i].toObject();int old=r.value("source").toInt(),next=routeSource_->currentData().toInt();
+        if(channelDomain(old)!=channelDomain(next)){r.remove("channel");r.remove("category");}
+        r["source"]=next;routes[i]=r;draft_["routes"]=routes;refreshRoutes();
+    });
+    connect(routeTarget_,&QComboBox::currentIndexChanged,this,[this]{
+        if(routeTarget_->currentIndex()>=0){changeRoute("control",routeTarget_->currentData().toString());refreshRoutes();}
+    });
+    connect(routeShape_,&QComboBox::currentIndexChanged,this,[this]{if(routeShape_->currentIndex()>=0)changeRoute("shape",routeShape_->currentData().toInt());});
+    connect(routeChannel_,&QComboBox::currentIndexChanged,this,[this]{if(routeChannel_->currentIndex()>=0)changeRoute("channel",routeChannel_->currentData().toString());});
+    connect(routeCategory_,&QLineEdit::textChanged,this,[this](const QString& value){changeRoute("category",value);});
+    for(auto [widget,key]:std::initializer_list<std::pair<QDoubleSpinBox*,const char*>>{
+        {routeAmount_,"amount"},{routeRate_,"rate"},{routeAttack_,"attack"},{routeRelease_,"release"},{routeSensitivity_,"sensitivity"}})
+        connect(widget,&QDoubleSpinBox::valueChanged,this,[this,key](double v){changeRoute(key,v);});
+    return panel;
+}
+void EffectBuilder::refreshRoutes(){
+    if(!routeList_)return;
+    auto routes=draft_.value("routes").toArray(),controls=draft_.value("controls").toArray();
+    int old=routeList_->currentIndex();
+    {QSignalBlocker block(routeList_);routeList_->clear();
+        for(int i=0;i<routes.size();++i){
+            auto r=routes[i].toObject();auto id=r.value("control");QString name="Missing control";
+            for(auto c:controls)if(c.toObject().value("id")==id){name=c.toObject().value("name").toString();break;}
+            routeList_->addItem(QString::number(i+1)+" · "+routeSourceName(r.value("source").toInt())+" → "+name);
+        }
+        if(!routes.isEmpty())routeList_->setCurrentIndex(std::clamp(old,0,int(routes.size())-1));
+    }
+    addRoute_->setEnabled(routes.size()<modulation_slots&&!controls.isEmpty());
+    addRoute_->setToolTip(controls.isEmpty()?"Create an exposed control first.":routes.size()>=modulation_slots?"All four modulation slots are in use.":"Add a modulation route to an exposed control.");
+    inspectRoute();
+}
+void EffectBuilder::inspectRoute(){
+    int i=routeList_->currentIndex();auto routes=draft_.value("routes").toArray();bool active=i>=0&&i<routes.size();
+    removeRoute_->setEnabled(active);
+    const QSignalBlocker a(routeSource_),b(routeTarget_),c(routeAmount_),d(routeShape_),e(routeRate_),f(routeAttack_),g(routeRelease_),h(routeSensitivity_),j(routeCategory_);
+    auto r=active?routes[i].toObject():QJsonObject{};
+    int source=r.value("source").toInt();
+    routeSource_->setCurrentIndex(routeSource_->findData(source));routeTarget_->clear();
+    auto id=r.value("control").toString();
+    for(auto v:draft_.value("controls").toArray()){auto c=v.toObject();routeTarget_->addItem(c.value("name").toString(),c.value("id").toString());}
+    if(!id.isEmpty()&&routeTarget_->findData(id)<0)routeTarget_->addItem("Missing saved control",id);
+    routeTarget_->setCurrentIndex(routeTarget_->findData(id));
+    routeAmount_->setValue(r.value("amount").toDouble());routeShape_->setCurrentIndex(routeShape_->findData(r.value("shape").toInt()));
+    routeRate_->setValue(r.value("rate").toDouble(1));routeAttack_->setValue(r.value("attack").toDouble(10));
+    routeRelease_->setValue(r.value("release").toDouble(100));routeSensitivity_->setValue(r.value("sensitivity").toDouble());
+    routeCategory_->setText(r.value("category").toString());
+    for(QWidget* w:std::initializer_list<QWidget*>{routeSource_,routeTarget_,routeAmount_})w->setEnabled(active);
+    auto show=[this](QWidget* field,bool visible){
+        routeRows_.at(field)->setVisible(visible);
+    };
+    show(routeShape_,active&&source==1);show(routeRate_,active&&source==1);
+    show(routeAttack_,active&&source>=2&&source<=5);show(routeRelease_,active&&source>=2&&source<=5);
+    show(routeSensitivity_,active&&source>=3&&source<=5);
+    show(routeChannel_,active&&channelDomain(source)!=0);show(refreshChannels_,active&&channelDomain(source)!=0);
+    show(routeCategory_,active&&source==6);
+    routeForm_->invalidate();routeForm_->activate();
+    if(routeList_->isVisible())refreshRouteChannels();
+}
+void EffectBuilder::refreshRouteChannels(){
+    const QSignalBlocker block(routeChannel_);routeChannel_->clear();
+    auto routes=draft_.value("routes").toArray();int i=routeList_->currentIndex();if(i<0||i>=routes.size())return;
+    auto r=routes[i].toObject();int source=r.value("source").toInt();
+    if(!channelDomain(source))return;
+    auto saved=r.value("channel").toString();auto bytes=saved.toUtf8();
+    auto* props=obs_properties_create();auto* prop=obs_properties_add_list(props,"channel","Channel",OBS_COMBO_TYPE_LIST,OBS_COMBO_FORMAT_STRING);
+    if(source==6)sound_channel_choices(prop,bytes.constData());else sight_channel_choices(prop,bytes.constData(),source);
+    for(size_t n=0;n<obs_property_list_item_count(prop);++n){
+        routeChannel_->addItem(QString::fromUtf8(obs_property_list_item_name(prop,n)),QString::fromUtf8(obs_property_list_item_string(prop,n)));
+        if(obs_property_list_item_disabled(prop,n))if(auto* m=qobject_cast<QStandardItemModel*>(routeChannel_->model()))m->item(int(n))->setEnabled(false);
+    }
+    obs_properties_destroy(props);routeChannel_->setCurrentIndex(routeChannel_->findData(saved));
+}
+void EffectBuilder::changeRoute(const QString& key,const QJsonValue& value){
+    int i=routeList_->currentIndex();auto routes=draft_.value("routes").toArray();if(i<0||i>=routes.size())return;
+    auto r=routes[i].toObject();r[key]=value;routes[i]=r;draft_["routes"]=routes;
+}
+void EffectBuilder::addRoute(){
+    auto routes=draft_.value("routes").toArray(),controls=draft_.value("controls").toArray();
+    if(routes.size()>=modulation_slots||controls.isEmpty())return;
+    auto id=macros_->currentData().toString();if(id.isEmpty())id=controls[0].toObject().value("id").toString();
+    routes.append(QJsonObject{{"control",id},{"source",1},{"amount",.25},{"rate",1},{"shape",0}});
+    draft_["routes"]=routes;refreshRoutes();routeList_->setCurrentIndex(routes.size()-1);message("Modulation route added to draft.");
+}
+void EffectBuilder::removeRoute(){
+    int i=routeList_->currentIndex();auto routes=draft_.value("routes").toArray();if(i<0||i>=routes.size())return;
+    routes.removeAt(i);draft_["routes"]=routes;refreshRoutes();message("Modulation route removed from draft.");
 }
 void EffectBuilder::addNode(){
     auto* item=library_->currentItem();if(!item||!(item->flags()&Qt::ItemIsEnabled))return;

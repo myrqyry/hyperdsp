@@ -17,8 +17,11 @@
 #include <QTest>
 #include <QTabWidget>
 #include <QJsonObject>
+#include <QJsonDocument>
 #include <obs-module.h>
 #include <cstdio>
+#include "sound-signal-fixture.hpp"
+#include "sight-signal-fixture.hpp"
 static obs_module_t* loaded_module=nullptr;
 extern "C" obs_module_t* obs_current_module(){return loaded_module;}
 static const char* name(void*){return "Test audio";}
@@ -34,7 +37,7 @@ int main(int argc,char** argv){
     if(obs_open_module(&module,argv[1],argv[2])!=MODULE_SUCCESS||!obs_init_module(module))return 5;
     loaded_module=module;
     obs_source_info fixture{.id="builder_test_audio",.type=OBS_SOURCE_TYPE_INPUT,.output_flags=OBS_SOURCE_AUDIO,.get_name=name,.create=create,.destroy=destroy};
-    obs_register_source(&fixture);
+    obs_register_source(&fixture);obs_register_source(&sound_fixture::info);obs_register_source(&sight_fixture::info);
     auto* source=obs_source_create("builder_test_audio","Builder test",nullptr,nullptr);
     auto* filter=obs_source_create_private("hyperdsp_graph_filter","Graph",nullptr);
     obs_source_filter_add(source,filter);
@@ -246,6 +249,64 @@ int main(int argc,char** argv){
                 builder.setDraft(committed);
             }
             std::printf("BUILDER_MACROS_PASS=%d\n",macros);ok=ok&&macros;
+            auto* addRoute=builder.findChild<QPushButton*>("addRoute");
+            auto* removeRoute=builder.findChild<QPushButton*>("removeRoute");
+            auto* routeList=builder.findChild<QComboBox*>("routeList");
+            auto* routeSource=builder.findChild<QComboBox*>("routeSource");
+            auto* routeTarget=builder.findChild<QComboBox*>("routeTarget");
+            auto* routeChannel=builder.findChild<QComboBox*>("routeChannel");
+            auto* category=builder.findChild<QLineEdit*>("routeCategory");
+            auto* amount=builder.findChild<QDoubleSpinBox*>("routeAmount");
+            auto* rate=builder.findChild<QDoubleSpinBox*>("routeRate");
+            auto* shape=builder.findChild<QComboBox*>("routeShape");
+            bool routes=addRoute&&removeRoute&&routeList&&routeSource&&routeTarget&&routeChannel&&category&&amount&&rate&&shape;
+            if(routes){
+                auto before=builder.draft();
+                auto id=before.value("controls").toArray()[0].toObject().value("id").toString();
+                tabs->setCurrentIndex(3);QTest::mouseClick(addRoute,Qt::LeftButton);
+                routeSource->setCurrentIndex(routeSource->findData(1));amount->setValue(-.4);rate->setValue(2.5);shape->setCurrentIndex(shape->findData(2));
+                auto r=builder.draft().value("routes").toArray()[0].toObject();
+                routes=routes&&r.value("control")==id&&r.value("source").toInt()==1&&r.value("amount").toDouble()==-.4&&r.value("rate").toDouble()==2.5&&r.value("shape").toInt()==2;
+                auto* producer=obs_source_create_private("yamnet_classifier_source","Speech detector",nullptr);
+                obs_source_filter_add(source,producer);
+                auto channel=QString::fromUtf8(obs_source_get_uuid(source))+"/"+QString::fromUtf8(obs_source_get_uuid(producer));
+                QTest::mouseClick(addRoute,Qt::LeftButton);routeSource->setCurrentIndex(routeSource->findData(6));
+                int idx=routeChannel->findData(channel);routes=routes&&idx>=0;
+                routeChannel->setCurrentIndex(idx);category->setText("Speech");QTest::keyClick(category,Qt::Key_Return);
+                QTest::mouseClick(addRoute,Qt::LeftButton);routeSource->setCurrentIndex(routeSource->findData(8));
+                idx=routeChannel->findData("test-hand");routes=routes&&idx>=0;routeChannel->setCurrentIndex(idx);
+                QTest::mouseClick(addRoute,Qt::LeftButton);routeSource->setCurrentIndex(routeSource->findData(3));
+                routes=routes&&!addRoute->isEnabled()&&builder.draft().value("routes").toArray().size()==4;
+                auto* data=obs_source_get_settings(filter);auto old=std::string(obs_data_get_string(data,"graph_json"));obs_data_release(data);
+                routes=routes&&old.find("\"routes\"")==std::string::npos;
+                QTest::mouseClick(apply,Qt::LeftButton);
+                data=obs_source_get_settings(filter);
+                auto applied=QJsonDocument::fromJson(obs_data_get_string(data,"graph_json")).object();obs_data_release(data);
+                routes=routes&&applied==builder.draft();
+                auto saved=builder.draft();obs_source_filter_remove(source,producer);obs_source_release(producer);
+                builder.setDraft(saved);routeList->setCurrentIndex(1);
+                routes=routes&&routeChannel->currentData().toString()==channel&&builder.draft()==saved;
+                routeList->setCurrentIndex(2);routeSource->setCurrentIndex(routeSource->findData(6));
+                routes=routes&&builder.draft().value("routes").toArray()[2].toObject().value("channel").toString().isEmpty();
+                QTest::mouseClick(apply,Qt::LeftButton);
+                data=obs_source_get_settings(filter);
+                routes=routes&&QJsonDocument::fromJson(obs_data_get_string(data,"graph_json")).object()==applied;obs_data_release(data);
+                QTest::mouseClick(removeRoute,Qt::LeftButton);
+                routes=routes&&addRoute->isEnabled()&&builder.draft().value("routes").toArray().size()==3;
+                builder.setDraft(saved);routeList->setCurrentIndex(0);QApplication::processEvents();
+                routes=routes&&rate->isVisible()&&shape->isVisible()&&!category->isVisible()&&!routeChannel->isVisible();
+                std::printf("ROUTE_VIS rate=%d shape=%d category=%d channel=%d\n",rate->isVisible(),shape->isVisible(),category->isVisible(),routeChannel->isVisible());
+                routeList->setCurrentIndex(1);QApplication::processEvents();
+                routes=routes&&!rate->isVisible()&&!shape->isVisible()&&category->isVisible()&&routeChannel->isVisible();
+                routeList->setCurrentIndex(0);
+                QTest::qWait(50);
+                auto previousSize=builder.size();builder.resize(420,640);QTest::qWait(50);
+                routes=routes&&rate->isVisible()&&shape->isVisible()&&rate->height()>12&&shape->height()>12&&rate->mapTo(&builder,QPoint()).y()>shape->mapTo(&builder,QPoint()).y()&&shape->mapTo(&builder,QPoint()).y()>amount->mapTo(&builder,QPoint()).y();
+                if(qEnvironmentVariableIsSet("HYPERDSP_BUILDER_SCREENSHOT"))
+                    builder.grab().save(qEnvironmentVariable("HYPERDSP_BUILDER_SCREENSHOT")+".narrow.png");
+                builder.resize(previousSize);QTest::qWait(50);
+            }
+            std::printf("BUILDER_ROUTES_PASS=%d\n",routes);ok=ok&&routes;
             QTest::qWait(80);
             if(qEnvironmentVariableIsSet("HYPERDSP_BUILDER_SCREENSHOT"))builder.grab().save(qEnvironmentVariable("HYPERDSP_BUILDER_SCREENSHOT"));
         }

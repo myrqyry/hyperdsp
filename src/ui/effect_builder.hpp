@@ -6,7 +6,7 @@
 #include <vector>
 #include <map>
 #include <QPointF>
-class QDoubleSpinBox;class QPushButton;class QComboBox;class QLineEdit;class QListWidget;class QGraphicsView;class QGraphicsScene;class QLabel;class QFormLayout;class QTableWidget;class QScrollArea;
+class QVBoxLayout;class QDoubleSpinBox;class QPushButton;class QComboBox;class QLineEdit;class QListWidget;class QGraphicsView;class QGraphicsScene;class QLabel;class QFormLayout;class QTableWidget;class QScrollArea;
 namespace hyperdsp {
 class EffectBuilder final:public QWidget {
 public:
@@ -42,6 +42,19 @@ private:
     void addBinding();
     void removeBinding();
     QJsonObject bindingMetadata(int node,const QString& key)const;
+    QComboBox *routeList_=nullptr,*routeSource_=nullptr,*routeTarget_=nullptr,*routeChannel_=nullptr,*routeShape_=nullptr;
+    QLineEdit* routeCategory_=nullptr;
+    QDoubleSpinBox *routeAmount_=nullptr,*routeRate_=nullptr,*routeAttack_=nullptr,*routeRelease_=nullptr,*routeSensitivity_=nullptr;
+    QPushButton *addRoute_=nullptr,*removeRoute_=nullptr,*refreshChannels_=nullptr;
+    QVBoxLayout* routeForm_=nullptr;
+    std::map<QWidget*,QWidget*> routeRows_;
+    QWidget* makeRoutePanel();
+    void refreshRoutes();
+    void inspectRoute();
+    void refreshRouteChannels();
+    void changeRoute(const QString&,const QJsonValue&);
+    void addRoute();
+    void removeRoute();
     QLabel* status_=nullptr;
     bool statusError_=false;
     void refreshTargets();
