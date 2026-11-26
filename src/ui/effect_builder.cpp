@@ -22,6 +22,8 @@
 #include <QFileDialog>
 #include <QFile>
 #include <QSaveFile>
+#include <QDir>
+#include <QFileInfo>
 #include <QFormLayout>
 #include <QGraphicsView>
 #include <QGraphicsScene>
@@ -456,7 +458,16 @@ obs_source_t* find_target(QComboBox* combo){
 }
 QJsonObject empty(){return {{"schema",1},{"nodes",QJsonArray{}},{"output",-1}};}
 }
-EffectBuilder::EffectBuilder(QWidget* parent):QWidget(parent),draft_(empty()){
+namespace {
+QString storage_path(const QString& supplied,bool bundled){
+    if(!supplied.isEmpty())return supplied;
+    char* path=bundled?obs_module_file("graphs"):obs_module_config_path("effect-builder");
+    if(!path)return {};
+    auto result=QString::fromUtf8(path);bfree(path);return result;
+}
+}
+EffectBuilder::EffectBuilder(QWidget* parent,QString storagePath,QString bundledPath):QWidget(parent),draft_(empty()),
+    storage_(storage_path(storagePath,false)),bundledPath_(storage_path(bundledPath,true)){
     setObjectName("hyperdspEffectBuilder");
     // Let OBS provide all widget styling, including custom theme QSS.
     auto* root=new QVBoxLayout(this);root->setContentsMargins(6,6,6,6);root->setSpacing(5);
@@ -541,6 +552,7 @@ EffectBuilder::EffectBuilder(QWidget* parent):QWidget(parent),draft_(empty()){
     tabs->addTab(monitor,"Monitor");
     tabs->addTab(new PreviewPanel([this]{return QJsonDocument(draft_).toJson(QJsonDocument::Compact);}),"Preview");
     tabs->addTab(new AuditionPanel([this]{return QJsonDocument(draft_).toJson(QJsonDocument::Compact);}),"Audition");
+    tabs->addTab(makePresetPanel(),"Presets");
     connect(target_,&QComboBox::currentIndexChanged,monitor,[monitor]{monitor->reset();if(monitor->isVisible())monitor->poll();});
 
     connect(tabs,&QTabWidget::currentChanged,this,[this](int index){if(index==3)refreshRoutes();});
@@ -569,21 +581,121 @@ EffectBuilder::EffectBuilder(QWidget* parent):QWidget(parent),draft_(empty()){
     connect(applyBtn,&QPushButton::clicked,this,[this]{apply(false);});
     connect(open,&QPushButton::clicked,this,[this]{
         auto path=QFileDialog::getOpenFileName(this,"Import graph",{},"HyperDSP graph (*.json)");
-        if(path.isEmpty())return;QFile file(path);
-        if(!file.open(QIODevice::ReadOnly)||file.size()>65536){message("Cannot read graph (64 KiB limit).",true);return;}
-        const auto bytes=file.readAll();json_error_t strict_error{};
-        auto* strict=json_loadb(bytes.constData(),size_t(bytes.size()),JSON_REJECT_DUPLICATES,&strict_error);
-        if(!strict){message(QString::fromUtf8(strict_error.text),true);return;}json_decref(strict);
-        QJsonParseError error;auto doc=QJsonDocument::fromJson(bytes,&error);
-        if(error.error!=QJsonParseError::NoError||!doc.isObject()){message(error.errorString(),true);return;}
-        setDraft(doc.object());message("Imported draft. Validate or apply explicitly.");
+        if(path.isEmpty())return;
+        BuilderDocument d;QString error;
+        if(!BuilderStorage::readGraph(path,d,error)){message(error,true);return;}
+        if(replaceDocument(d))message("Imported draft. Validate or apply explicitly.");
     });
     connect(save,&QPushButton::clicked,this,[this]{
         auto path=QFileDialog::getSaveFileName(this,"Export graph","effect.json","HyperDSP graph (*.json)");
         if(path.isEmpty())return;QSaveFile file(path);
         auto bytes=QJsonDocument(draft_).toJson();if(file.open(QIODevice::WriteOnly)&&file.write(bytes)==bytes.size()&&file.commit())message("Draft exported.");else message("Export failed.",true);
     });
-    refreshTargets();inventory_=inventory();refreshLibrary();redraw();inspect();message("Add a HyperDSP Graph filter to an audio source, then select it here. Edits are drafts until Apply.");
+    refreshTargets();inventory_=inventory();refreshLibrary();redraw();inspect();
+    message("Add a HyperDSP Graph filter to an audio source, then select it here. Edits are drafts until Apply.");
+    recoverAtStartup();refreshPresets();
+    autosave_.setInterval(500);connect(&autosave_,&QTimer::timeout,this,[this]{saveRecovery();});autosave_.start();
+}
+EffectBuilder::~EffectBuilder(){autosave_.stop();saveRecovery();}
+BuilderDocument EffectBuilder::document()const{return {draft_,positions_,{}};}
+void EffectBuilder::restoreDocument(const BuilderDocument& d){
+    draft_=d.graph;positions_=d.positions;
+    {QSignalBlocker b(macros_);macros_->clear();}
+    selected_=draft_.value("output").toInt(-1);redraw();inspect();fitCanvas();
+}
+void EffectBuilder::recoverAtStartup(){
+    if(storage_.hasRecovery()){
+        requireExplicitTarget_=true;
+        BuilderDocument d;QString error;
+        if(storage_.readRecovery(d,error)){
+            restoreDocument(d);target_->setCurrentIndex(-1);
+            message("Recovered local draft and layout. Select a target explicitly before Apply.");
+            recoveryStatus_->setText("Recovered previous session.");
+        }else{
+            recoveryWritable_=false;target_->setCurrentIndex(-1);
+            recoveryStatus_->setText("Recovery unreadable; preserved on disk. New draft archives it and re-enables autosave.");
+            message("Recovery unreadable: "+error,true);
+        }
+    }
+    lastSaved_=QJsonDocument(builder_document_json(document())).toJson(QJsonDocument::Compact);
+    previousDraft_->setEnabled(storage_.hasPrevious());
+}
+bool EffectBuilder::saveRecovery(){
+    if(!recoveryWritable_)return false;
+    auto d=document();auto bytes=QJsonDocument(builder_document_json(d)).toJson(QJsonDocument::Compact);
+    if(bytes==lastSaved_)return true;
+    QString error;
+    if(!storage_.saveRecovery(d,error)){
+        recoveryStatus_->setText("Draft not saved: "+error);return false;
+    }
+    lastSaved_=bytes;recoveryStatus_->setText("Draft and layout saved locally.");return true;
+}
+bool EffectBuilder::replaceDocument(const BuilderDocument& d){
+    QString error;
+    if(!recoveryWritable_){message("Recovery is unreadable and preserved; choose New draft to archive it before replacing the draft.",true);return false;}
+    auto old=document();
+    if(old.graph!=d.graph||old.positions!=d.positions){
+        if(!storage_.savePrevious(old,error)){message("Cannot preserve current draft: "+error,true);return false;}
+        // Commit the new recovery before changing editor state, so an interrupted
+        // transition never loses both copies.
+        if(!storage_.saveRecovery(d,error)){message("Cannot save replacement draft: "+error,true);return false;}
+        restoreDocument(d);lastSaved_=QJsonDocument(builder_document_json(d)).toJson(QJsonDocument::Compact);
+        saveRecovery();previousDraft_->setEnabled(true);
+    }
+    return true;
+}
+QWidget* EffectBuilder::makePresetPanel(){
+    auto* panel=new QWidget;auto* layout=new QVBoxLayout(panel);layout->setContentsMargins(3,3,3,3);layout->setSpacing(4);
+    auto* recoveryRow=new QHBoxLayout;
+    auto* fresh=button("New draft","newDraft",panel);previousDraft_=button("Restore previous","previousDraft",panel);
+    recoveryRow->addWidget(fresh);recoveryRow->addWidget(previousDraft_);layout->addLayout(recoveryRow);
+    recoveryStatus_=new QLabel("Draft autosave · local only");recoveryStatus_->setWordWrap(true);recoveryStatus_->setTextFormat(Qt::PlainText);layout->addWidget(recoveryStatus_);
+    presets_=new QListWidget;presets_->setObjectName("presetList");presets_->setAlternatingRowColors(true);layout->addWidget(presets_,1);
+    auto* row=new QHBoxLayout;
+    presetName_=new QLineEdit;presetName_->setObjectName("presetName");presetName_->setPlaceholderText("Name a new preset");presetName_->setMaxLength(80);
+    auto* save=button("Save as preset","savePreset",panel);row->addWidget(presetName_,1);row->addWidget(save);layout->addLayout(row);
+    auto* buttons=new QHBoxLayout;auto* load=button("Load selected","loadPreset",panel),*refresh=button("Refresh","refreshPresets",panel);
+    buttons->addWidget(load,1);buttons->addWidget(refresh);layout->addLayout(buttons);
+    auto* hint=new QLabel("Presets include graph and node positions. Loading replaces the draft, not the live effect. Previous draft is retained.");hint->setWordWrap(true);layout->addWidget(hint);
+    connect(fresh,&QPushButton::clicked,this,[this]{
+        if(!recoveryWritable_){
+            QString error;if(!storage_.archiveRecovery(error)){message(error,true);return;}
+            recoveryWritable_=true;lastSaved_.clear();
+        }
+        if(replaceDocument({empty(),{}, {}})&&saveRecovery())message("New draft. Previous draft retained.");
+    });
+    connect(previousDraft_,&QPushButton::clicked,this,[this]{
+        BuilderDocument d;QString error;if(!storage_.readPrevious(d,error)){message(error,true);return;}
+        if(replaceDocument(d))message("Previous draft restored. Live filter unchanged.");
+    });
+    connect(refresh,&QPushButton::clicked,this,[this]{refreshPresets();});
+    connect(save,&QPushButton::clicked,this,[this]{
+        QString error;auto id=storage_.savePreset(presetName_->text(),document(),error);
+        if(id.isEmpty()){message(error,true);return;}
+        refreshPresets();for(int i=0;i<presets_->count();++i)if(presets_->item(i)->data(Qt::UserRole).toString()==id){presets_->setCurrentRow(i);break;}
+        message("Saved a new local preset.");
+    });
+    auto loadSelected=[this]{
+        auto* item=presets_->currentItem();if(!item){message("Select a preset first.",true);return;}
+        BuilderDocument d;QString error;
+        bool ok=item->data(Qt::UserRole+1).toBool()?BuilderStorage::readGraph(item->data(Qt::UserRole).toString(),d,error):
+            storage_.readPreset(item->data(Qt::UserRole).toString(),d,error);
+        if(!ok){message(error,true);return;}
+        if(replaceDocument(d))message("Preset loaded into draft. Live filter unchanged.");
+    };
+    connect(load,&QPushButton::clicked,this,loadSelected);connect(presets_,&QListWidget::itemDoubleClicked,this,[loadSelected]{loadSelected();});
+    return panel;
+}
+void EffectBuilder::refreshPresets(){
+    presets_->clear();
+    if(!bundledPath_.isEmpty())for(auto& f:QDir(bundledPath_).entryInfoList({"*.json"},QDir::Files|QDir::NoSymLinks,QDir::Name)){
+        BuilderDocument d;QString error;if(!BuilderStorage::readGraph(f.absoluteFilePath(),d,error))continue;
+        auto* item=new QListWidgetItem(f.completeBaseName()+" · Bundled",presets_);
+        item->setData(Qt::UserRole,f.absoluteFilePath());item->setData(Qt::UserRole+1,true);
+    }
+    for(auto& p:storage_.presets()){
+        auto* item=new QListWidgetItem(p.name+" · Local",presets_);item->setData(Qt::UserRole,p.id);item->setData(Qt::UserRole+1,false);
+    }
 }
 void EffectBuilder::message(const QString& s,bool error){
     statusError_=error;status_->setText(error?"Error: "+s:s);refreshTheme();
@@ -625,7 +737,7 @@ void EffectBuilder::refreshTheme(){
 void EffectBuilder::refreshTargets(){
     auto old=target_->currentData();std::vector<Target> targets;obs_enum_sources(collect_source,&targets);
     target_->clear();for(auto& t:targets)target_->addItem(t.label,QStringList{t.parent,t.filter});
-    int index=target_->findData(old);if(index>=0)target_->setCurrentIndex(index);else if(old.isValid()||targets.size()!=1)target_->setCurrentIndex(-1);
+    int index=target_->findData(old);if(index>=0)target_->setCurrentIndex(index);else if(requireExplicitTarget_||old.isValid()||targets.size()!=1)target_->setCurrentIndex(-1);
 }
 QJsonArray EffectBuilder::inventory()const{
     obs_audio_info ai{};unsigned rate=48000,channels=2;
@@ -1110,7 +1222,7 @@ void EffectBuilder::loadTarget(){
     auto* target=find_target(target_);if(!target){message("Select an existing HyperDSP Graph filter.",true);return;}
     auto* settings=obs_source_get_settings(target);auto doc=QJsonDocument::fromJson(obs_data_get_string(settings,"graph_json"));obs_data_release(settings);obs_source_release(target);
     if(!doc.isObject()){message("Target contains invalid JSON. Restore it from filter properties first.",true);return;}
-    setDraft(doc.object());message("Loaded target draft. Live filter unchanged.");
+    if(replaceDocument({doc.object(),{}, {}}))message("Loaded target draft. Live filter unchanged.");
 }
 void EffectBuilder::apply(bool validateOnly){
     auto* target=find_target(target_);if(!target){message("Select an existing HyperDSP Graph filter.",true);return;}

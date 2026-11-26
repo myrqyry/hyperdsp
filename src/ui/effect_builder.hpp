@@ -6,11 +6,14 @@
 #include <vector>
 #include <map>
 #include <QPointF>
+#include "builder_storage.hpp"
+#include <QTimer>
 class QVBoxLayout;class QDoubleSpinBox;class QPushButton;class QComboBox;class QLineEdit;class QListWidget;class QGraphicsView;class QGraphicsScene;class QLabel;class QFormLayout;class QTableWidget;class QScrollArea;
 namespace hyperdsp {
 class EffectBuilder final:public QWidget {
 public:
-    explicit EffectBuilder(QWidget* parent=nullptr);
+    explicit EffectBuilder(QWidget* parent=nullptr,QString storagePath={},QString bundledPath={});
+    ~EffectBuilder() override;
     QJsonObject draft()const{return draft_;}
     void setDraft(const QJsonObject&);
     void refreshTheme();
@@ -18,6 +21,22 @@ protected:
     void changeEvent(QEvent*) override;
 private:
     QJsonObject draft_;
+    BuilderStorage storage_;
+    QString bundledPath_;
+    QTimer autosave_;
+    QByteArray lastSaved_;
+    bool recoveryWritable_=true,requireExplicitTarget_=false;
+    QListWidget* presets_=nullptr;
+    QLineEdit* presetName_=nullptr;
+    QPushButton* previousDraft_=nullptr;
+    QLabel* recoveryStatus_=nullptr;
+    BuilderDocument document()const;
+    void restoreDocument(const BuilderDocument&);
+    bool saveRecovery();
+    bool replaceDocument(const BuilderDocument&);
+    QWidget* makePresetPanel();
+    void refreshPresets();
+    void recoverAtStartup();
     QJsonArray inventory_;
     QJsonArray inventory()const;
     int selected_=-1;

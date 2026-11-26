@@ -21,6 +21,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QTemporaryFile>
+#include <QTemporaryDir>
 #include <QDir>
 #include <QDataStream>
 #include <QTimer>
@@ -52,8 +53,9 @@ int main(int argc,char** argv){
     auto* filter=obs_source_create_private("hyperdsp_graph_filter","Graph",nullptr);
     obs_source_filter_add(source,filter);
     bool ok=true;
+    QTemporaryDir storage;
     {
-        hyperdsp::EffectBuilder builder;
+        hyperdsp::EffectBuilder builder(nullptr,storage.path(),QString::fromUtf8(argv[2])+"/examples/graphs");
         builder.resize(880,620);builder.show();QTest::qWait(40);
         auto* target=builder.findChild<QComboBox*>("target");
         auto* search=builder.findChild<QLineEdit*>("search");
@@ -451,6 +453,76 @@ int main(int argc,char** argv){
             if(qEnvironmentVariableIsSet("HYPERDSP_BUILDER_SCREENSHOT"))builder.grab().save(qEnvironmentVariable("HYPERDSP_BUILDER_SCREENSHOT"));
         }
     }
+    bool persisted=storage.isValid();
+    QJsonObject saved=QJsonDocument::fromJson(R"({"schema":1,"nodes":[{"effect":"gain","params":{"gain_db":-3},"inputs":[{"source":-1,"weight":1}]}],"output":0})").object();
+    QPointF position;
+    {
+        hyperdsp::EffectBuilder editor(nullptr,storage.path(),QString::fromUtf8(argv[2])+"/examples/graphs");
+        editor.resize(880,620);editor.show();editor.setDraft(saved);QTest::qWait(40);
+        auto* graph=editor.findChild<QGraphicsView*>("graph");
+        auto* tabs=editor.findChild<QTabWidget*>("builderTabs");
+        auto* name=editor.findChild<QLineEdit*>("presetName");
+        auto* list=editor.findChild<QListWidget*>("presetList");
+        auto* save=editor.findChild<QPushButton*>("savePreset");
+        auto* load=editor.findChild<QPushButton*>("loadPreset");
+        auto* fresh=editor.findChild<QPushButton*>("newDraft");
+        auto* previous=editor.findChild<QPushButton*>("previousDraft");
+        persisted=persisted&&graph&&tabs&&name&&list&&save&&load&&fresh&&previous;
+        if(persisted){
+            QGraphicsItem* node=nullptr;
+            for(auto* i:graph->scene()->items())if(i->data(1)=="node"&&i->data(0).toInt()==0)node=i;
+            persisted=persisted&&node;
+            if(node){
+                auto start=graph->mapFromScene(node->sceneBoundingRect().center());
+                auto pos=node->pos();
+                QTest::mousePress(graph->viewport(),Qt::LeftButton,Qt::NoModifier,start);
+                QTest::mouseMove(graph->viewport(),start+QPoint(0,48),20);
+                QTest::mouseRelease(graph->viewport(),Qt::LeftButton,Qt::NoModifier,start+QPoint(0,48));
+                position=node->pos();persisted=persisted&&position!=pos;
+            }
+            tabs->setCurrentIndex(7);name->setText("Local example");QTest::mouseClick(save,Qt::LeftButton);
+            int row=-1;for(int i=0;i<list->count();++i)if(list->item(i)->text().contains("Local example"))row=i;
+            persisted=persisted&&row>=0&&list->count()>=3;
+            QTest::mouseClick(fresh,Qt::LeftButton);
+            persisted=persisted&&editor.draft().value("nodes").toArray().isEmpty();
+            QTest::mouseClick(previous,Qt::LeftButton);
+            persisted=persisted&&editor.draft()==saved;
+            QTest::mouseClick(fresh,Qt::LeftButton);
+            if(row>=0){list->setCurrentRow(row);QTest::mouseClick(load,Qt::LeftButton);}
+            persisted=persisted&&editor.draft()==saved;
+            if(qEnvironmentVariableIsSet("HYPERDSP_BUILDER_SCREENSHOT"))editor.grab().save(qEnvironmentVariable("HYPERDSP_BUILDER_SCREENSHOT")+".presets.png");
+            QTest::qWait(650); // autosave without Apply
+            hyperdsp::BuilderStorage store(storage.path());hyperdsp::BuilderDocument doc;QString error;
+            persisted=persisted&&store.readRecovery(doc,error)&&doc.graph==saved&&doc.positions.at(0)==position;
+        }
+    }
+    {
+        hyperdsp::EffectBuilder recovered(nullptr,storage.path(),QString::fromUtf8(argv[2])+"/examples/graphs");
+        auto* graph=recovered.findChild<QGraphicsView*>("graph");auto* target=recovered.findChild<QComboBox*>("target");
+        persisted=persisted&&recovered.draft()==saved&&target&&target->currentIndex()==-1&&graph;
+        bool layout=false;
+        if(graph)for(auto* i:graph->scene()->items())if(i->data(1)=="node"&&i->data(0).toInt()==0)layout=i->pos()==position;
+        persisted=persisted&&layout;
+        auto* refresh=recovered.findChild<QPushButton*>("refreshTargets");
+        if(refresh)refresh->click();
+        persisted=persisted&&refresh&&target->currentIndex()==-1;
+    }
+    const QByteArray corruptBytes="{not a recovery document";
+    {
+        QFile bad(storage.filePath("recovery.json"));
+        persisted=persisted&&bad.open(QIODevice::WriteOnly)&&bad.write(corruptBytes)==corruptBytes.size();bad.close();
+        hyperdsp::EffectBuilder editor(nullptr,storage.path(),QString::fromUtf8(argv[2])+"/examples/graphs");
+        editor.setDraft(saved);QTest::qWait(550);
+        persisted=persisted&&bad.open(QIODevice::ReadOnly)&&bad.readAll()==corruptBytes;bad.close();
+        auto* fresh=editor.findChild<QPushButton*>("newDraft");
+        if(fresh)fresh->click();
+        auto backups=QDir(storage.path()).entryList({"recovery-unreadable-*.json"},QDir::Files);
+        persisted=persisted&&fresh&&backups.size()==1;
+        if(backups.size()==1){QFile backup(storage.filePath(backups.first()));persisted=persisted&&backup.open(QIODevice::ReadOnly)&&backup.readAll()==corruptBytes;}
+        hyperdsp::BuilderStorage store(storage.path());hyperdsp::BuilderDocument doc;QString error;
+        persisted=persisted&&store.readRecovery(doc,error)&&doc.graph.value("nodes").toArray().isEmpty();
+    }
+    std::printf("BUILDER_PERSISTENCE_PASS=%d\n",persisted);ok=ok&&persisted;
     obs_source_filter_remove(source,filter);obs_source_release(filter);obs_source_release(source);obs_shutdown();
     std::printf("BUILDER_WIDGET_PASS=%d\n",ok);return ok?0:1;
 }
