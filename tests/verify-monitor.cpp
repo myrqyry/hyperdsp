@@ -1,5 +1,6 @@
 #include "framework/dsp/graph_monitor.hpp"
 #include "framework/dsp/monitor_spectrum.hpp"
+#include "framework/dsp/monitor_analysis.hpp"
 #include <obs-module.h>
 #include <util/platform.h>
 #include <cstdio>
@@ -45,6 +46,23 @@ int main(int argc,char** argv){
     ok=ok&&frame.rate==48000&&peak==32&&std::abs(in[peak]-20*std::log10(.4))<.1&&std::abs(out[peak]-in[peak]+6)<.1;
     ok=ok&&frame.control_count==1&&std::string(frame.controls[0].id.data())=="level"&&std::abs(frame.controls[0].effective-.5)<.001;
     std::printf("MONITOR peak=%u input=%g output=%g control=%g\n",peak,in[peak],out[peak],frame.controls[0].effective);
+    GraphMonitorFrameV2 stereo{};
+    auto readStereo=[&](){
+        calldata_t d;calldata_init(&d);calldata_set_ptr(&d,"frame",&stereo);
+        bool ready=proc_handler_call(obs_source_get_proc_handler(filter),"hyperdsp_graph_monitor_v2",&d)&&calldata_bool(&d,"available");calldata_free(&d);return ready;
+    };
+    ok=ok&&readStereo()&&stereo.stereo&&stereo.signal.sequence==frame.sequence;
+    auto metrics=window_stereo(stereo.signal.output,stereo.output_right);
+    ok=ok&&metrics.valid&&metrics.correlation_valid&&std::abs(metrics.correlation+1)<1e-6&&metrics.mono_loss_db<-100;
+    for(unsigned i=0;i<monitor_samples;++i)ok=ok&&stereo.signal.input[i]==-stereo.input_right[i]&&stereo.signal.output[i]==-stereo.output_right[i];
+    std::array<float,monitor_samples> silence{},unity{};unity.fill(.4f);
+    auto mono=window_stereo(unity,unity),single=window_stereo(unity,silence);
+    ok=ok&&mono.valid&&mono.correlation_valid&&std::abs(mono.correlation-1)<1e-6&&std::abs(mono.mono_loss_db)<1e-6;
+    ok=ok&&single.valid&&!single.correlation_valid&&std::abs(single.mono_loss_db+3.0103)<.001&&!window_stereo(silence,silence).valid;
+    auto delta=spectrum_difference(in,out);
+    ok=ok&&delta.valid[peak]&&std::abs(delta.db[peak]+6)<.1&&!delta.valid[0];
+    stereo.size=0;ok=ok&&!readStereo();stereo.size=sizeof(stereo);
+    std::printf("MONITOR_STEREO correlation=%g fold=%g spectrum_delta=%g\n",metrics.correlation,metrics.mono_loss_db,delta.db[peak]);
     // The production graph routes a square LFO to the macro; the
     // snapshot must report effective and manual values independently.
     obs_data_set_string(settings,"graph_json",R"({"schema":1,"nodes":[{"effect":"gain","inputs":[{"source":-1,"weight":1}]}],"output":0,"controls":[{"id":"level","name":"Level","default":0.5,"bindings":[{"node":0,"parameter":"gain_db","low":-12,"high":0}]}],"routes":[{"control":"level","source":1,"shape":2,"rate":0.05,"amount":0.25}]})");
@@ -55,7 +73,7 @@ int main(int argc,char** argv){
     obs_data_set_string(settings,"graph_json",R"({"schema":1,"nodes":[],"output":-1})");obs_source_update(filter,settings);
     ok=ok&&!read();stream(5);ok=ok&&read()&&frame.control_count==0;
     for(unsigned i=0;i<frame.input.size();++i)ok=ok&&frame.input[i]==frame.output[i];
-    os_sleep_ms(650);ok=ok&&!read();
+    os_sleep_ms(650);ok=ok&&!read()&&!readStereo();
     // Deterministic lease and window coverage, independent of wall-clock sleeps.
     GraphMonitor core;GraphMonitorFrame snap{};
     std::array<GraphMonitorControl,8> controls{};
@@ -74,6 +92,16 @@ int main(int argc,char** argv){
     ok=ok&&core.begin(input.data(),512,48000,t+1000000010ULL);
     core.end(output.data(),512,t+1000000011ULL,controls,0);
     ok=ok&&core.read(snap,t+1000000012ULL)&&snap.input.back()==.25f;
+    GraphMonitorFrameV2 pair{};
+    core.invalidate();core.read(pair,t+1000000013ULL);
+    ok=ok&&core.begin(input.data(),512,48000,t+1000000014ULL,input.data());
+    core.end(output.data(),512,t+1000000015ULL,controls,0,output.data());
+    ok=ok&&core.begin(input.data(),512,48000,t+1000000016ULL);
+    core.end(output.data(),512,t+1000000017ULL,controls,0);
+    ok=ok&&!core.read(pair,t+1000000018ULL); // never combine mono and stereo halves
+    ok=ok&&core.begin(input.data(),512,48000,t+1000000019ULL);
+    core.end(output.data(),512,t+1000000020ULL,controls,0);
+    ok=ok&&core.read(pair,t+1000000021ULL)&&!pair.stereo;
     obs_source_filter_remove(source,filter);obs_source_release(filter);obs_source_release(source);obs_data_release(settings);obs_shutdown();
     std::printf("GRAPH_MONITOR_PASS=%d\n",ok);return ok?0:1;
 }

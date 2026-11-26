@@ -2,6 +2,7 @@
 #include "audition_panel.hpp"
 #include "effect-metadata.hpp"
 #include "framework/dsp/monitor_spectrum.hpp"
+#include "framework/dsp/monitor_analysis.hpp"
 #include "framework/dsp/graph_preview.hpp"
 #include <future>
 #include <chrono>
@@ -166,29 +167,128 @@ protected:
         spectrumPath(input,in,Qt::DashLine);spectrumPath(output,out,Qt::SolidLine);
     }
 };
+class LiveAnalysisPlot final:public QWidget {
+    GraphMonitorFrameV2 frame_{};
+    SpectrumDifference difference_{};
+    int view_=1;
+    bool valid_=false;
+public:
+    explicit LiveAnalysisPlot(QWidget* parent):QWidget(parent){setMinimumHeight(180);setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Expanding);}
+    void setView(int view){view_=view;update();}
+    void setFrame(const GraphMonitorFrameV2& frame,const MonitorSpectrum::Bins& input,const MonitorSpectrum::Bins& output){
+        frame_=frame;difference_=spectrum_difference(input,output);valid_=true;update();
+    }
+    void clear(){valid_=false;update();}
+protected:
+    void paintEvent(QPaintEvent*)override{
+        QPainter p(this);p.setRenderHint(QPainter::Antialiasing);GraphColors c(palette());
+        p.fillRect(rect(),c.base);p.setPen(c.text);
+        if(!valid_){p.drawText(rect(),Qt::AlignCenter,"Waiting for audio");return;}
+        const QColor grid=blend(c.base,c.text,.19);
+        if(view_==1){
+            if(!frame_.stereo){p.drawText(rect(),Qt::AlignCenter,"Stereo layout required");return;}
+            const double size=std::min(width()-28.,height()-46.);
+            if(size<40)return;
+            QRectF area((width()-size)/2,22,size,size);
+            const auto center=area.center();double radius=size/2;
+            p.setPen(QPen(grid,1));p.drawEllipse(area);
+            p.drawEllipse(center,radius/2,radius/2);
+            p.drawLine(QPointF(center.x(),area.top()),QPointF(center.x(),area.bottom()));
+            p.drawLine(QPointF(area.left(),center.y()),QPointF(area.right(),center.y()));
+            p.drawLine(center+QPointF(-radius*.707,-radius*.707),center+QPointF(radius*.707,radius*.707));
+            p.drawLine(center+QPointF(radius*.707,-radius*.707),center+QPointF(-radius*.707,radius*.707));
+            p.setPen(c.text);p.drawText(QRectF(0,2,width(),18),Qt::AlignCenter,"Mid · mono");
+            p.drawText(QRectF(0,area.bottom()+2,width(),18),Qt::AlignCenter,"Side · horizontal");
+            auto scatter=[&](const auto& l,const auto& r,QColor color,double thickness){
+                QPolygonF points;points.reserve(monitor_samples);
+                for(unsigned j=0;j<monitor_samples;++j){
+                    double m=(double(l[j])+r[j])*.5,side=(double(l[j])-r[j])*.5;
+                    points<<center+QPointF(std::clamp(side,-1.,1.)*radius,-std::clamp(m,-1.,1.)*radius);
+                }
+                p.setPen(QPen(color,thickness,Qt::SolidLine,Qt::RoundCap));p.drawPoints(points);
+            };
+            scatter(frame_.signal.input,frame_.input_right,c.edge,3.5);
+            scatter(frame_.signal.output,frame_.output_right,c.accent,1.5);
+        }else{
+            QRectF area(44,22,width()-54,height()-43);
+            if(area.width()<25||area.height()<25)return;
+            const double low=std::max(20.,double(frame_.signal.rate)/monitor_samples),high=frame_.signal.rate/2.;
+            auto x=[&](double hz){return area.left()+area.width()*std::log(hz/low)/std::log(high/low);};
+            auto y=[&](double db){return area.top()+area.height()*(24-std::clamp(db,-24.,24.))/48;};
+            p.drawText(QRectF(4,2,width()-8,18),Qt::AlignLeft,"Observed spectrum difference · dB");
+            for(int db:{24,12,0,-12,-24}){
+                p.setPen(QPen(grid,db==0?1.5:1));p.drawLine(QPointF(area.left(),y(db)),QPointF(area.right(),y(db)));
+                p.setPen(c.text);p.drawText(QRectF(0,y(db)-8,39,16),Qt::AlignRight|Qt::AlignVCenter,QString::number(db));
+            }
+            for(double hz:{100.,1000.,10000.})if(hz>low&&hz<high){
+                p.setPen(QPen(grid,1));p.drawLine(QPointF(x(hz),area.top()),QPointF(x(hz),area.bottom()));
+                p.setPen(c.text);p.drawText(QRectF(x(hz)-20,area.bottom()+1,40,16),Qt::AlignCenter,hz>=1000?QString::number(hz/1000)+"k":QString::number(hz));
+            }
+            QPainterPath path;bool first=true,any=false;
+            p.save();p.setClipRect(area.adjusted(-1,-1,1,1));p.setPen(QPen(c.accent,2));
+            for(unsigned i=1;i<difference_.db.size();++i){
+                double hz=double(i)*frame_.signal.rate/monitor_samples;
+                if(hz<low||!difference_.valid[i]){first=true;continue;}
+                QPointF pt(x(hz),y(difference_.db[i]));
+                if(first){path.moveTo(pt);first=false;}else path.lineTo(pt);
+                p.drawPoint(pt);any=true;
+            }
+            p.drawPath(path);p.restore();
+            if(!any){p.setPen(c.text);p.drawText(area,Qt::AlignCenter,"No sufficiently excited bins");}
+        }
+    }
+};
 class MonitorPanel final:public QWidget {
     MonitorPlot* plot_;
+    LiveAnalysisPlot* analysis_;
+    QStackedWidget* stack_;
+    QComboBox* view_;
+    QLabel* detail_;
+    GraphMonitorFrameV2 frame_{};
+    bool valid_=false;
     QLabel *status_,*controls_;
     QTimer timer_;
-    std::function<bool(GraphMonitorFrame&)> read_;
+    std::function<bool(GraphMonitorFrameV2&)> read_;
 public:
-    MonitorPanel(std::function<bool(GraphMonitorFrame&)> read,QWidget* parent=nullptr):QWidget(parent),read_(std::move(read)){
+    MonitorPanel(std::function<bool(GraphMonitorFrameV2&)> read,QWidget* parent=nullptr):QWidget(parent),read_(std::move(read)){
         setObjectName("graphMonitor");setProperty("hasFrame",false);
         auto* layout=new QVBoxLayout(this);layout->setContentsMargins(3,3,3,3);layout->setSpacing(3);
         status_=new QLabel("Waiting for applied graph audio");status_->setObjectName("monitorStatus");status_->setTextFormat(Qt::PlainText);status_->setWordWrap(true);
-        layout->addWidget(status_);plot_=new MonitorPlot(this);layout->addWidget(plot_,1);
+        layout->addWidget(status_);
+        view_=new QComboBox;view_->setObjectName("monitorView");view_->addItems({"Waveform / spectrum","Stereo vectorscope","Spectrum difference"});layout->addWidget(view_);
+        stack_=new QStackedWidget;plot_=new MonitorPlot(this);analysis_=new LiveAnalysisPlot(this);
+        stack_->addWidget(plot_);stack_->addWidget(analysis_);layout->addWidget(stack_,1);
+        detail_=new QLabel;detail_->setObjectName("monitorDetail");detail_->setWordWrap(true);detail_->setTextFormat(Qt::PlainText);layout->addWidget(detail_);
         auto* legend=new QLabel("Input — dashed   Output — solid · applied graph, not draft");legend->setWordWrap(true);layout->addWidget(legend);
+        connect(view_,&QComboBox::currentIndexChanged,this,[this,legend](int i){
+            stack_->setCurrentIndex(i==0?0:1);analysis_->setView(i);updateDetail();
+            legend->setText(i==0?"Input — dashed   Output — solid · applied graph, not draft":
+                i==1?"Input — larger dots   Output — smaller dots · applied graph":
+                "Positive = greater output magnitude · negative = less · applied graph");
+        });
         controls_=new QLabel;controls_->setTextFormat(Qt::PlainText);controls_->setWordWrap(true);layout->addWidget(controls_);
         timer_.setInterval(50);connect(&timer_,&QTimer::timeout,this,[this]{poll();});
     }
+    void updateDetail(){
+        if(!valid_||view_->currentIndex()==0){detail_->clear();return;}
+        if(view_->currentIndex()==2){detail_->setText("Observed channel 1 output minus input spectrum; masked quiet bins, not a transfer function.");return;}
+        if(!frame_.stereo){detail_->setText("Stereo analysis requires two channels.");return;}
+        auto metrics=window_stereo(frame_.signal.output,frame_.output_right);
+        if(!metrics.valid){detail_->setText("Output silent · input and output vectors shown");return;}
+        detail_->setText(QString("Output · correlation %1 · mono fold %2 dB · side %3%")
+            .arg(metrics.correlation_valid?QString::number(metrics.correlation,'f',3):QString("undefined"))
+            .arg(metrics.mono_loss_db,0,'f',1).arg(metrics.side_fraction*100,0,'f',1));
+    }
     void reset(){
-        plot_->clear();setProperty("hasFrame",false);status_->setText("Waiting for applied graph audio");controls_->clear();
+        plot_->clear();analysis_->clear();valid_=false;detail_->clear();setProperty("hasFrame",false);status_->setText("Waiting for applied graph audio");controls_->clear();
     }
     void poll(){
-        GraphMonitorFrame frame{};
-        if(!read_(frame)||frame.rate<8000||frame.rate>192000||frame.control_count>8){reset();return;}
+        GraphMonitorFrameV2 next{};
+        if(!read_(next)){reset();return;}
+        const auto& frame=next.signal;
+        if(frame.rate<8000||frame.rate>192000||frame.control_count>8){reset();return;}
         if(plot_->valid&&plot_->frame.sequence==frame.sequence&&plot_->frame.epoch==frame.epoch)return;
-        plot_->setFrame(frame);setProperty("hasFrame",true);
+        frame_=next;valid_=true;plot_->setFrame(frame);analysis_->setFrame(next,plot_->input,plot_->output);updateDetail();setProperty("hasFrame",true);
         auto peak=[](const auto& samples){float max=0;for(float v:samples)max=std::max(max,std::abs(v));return 20*std::log10(std::max(max,1e-6f));};
         status_->setText(QString("Live · %1 kHz · Ch 1 peak: in %2 / out %3 dBFS").arg(frame.rate/1000.,0,'g',4).arg(peak(frame.input),0,'f',1).arg(peak(frame.output),0,'f',1));
         QStringList values;
@@ -543,10 +643,10 @@ EffectBuilder::EffectBuilder(QWidget* parent,QString storagePath,QString bundled
     connect(addBinding_,&QPushButton::clicked,this,[this]{addBinding();});
     connect(removeBinding_,&QPushButton::clicked,this,[this]{removeBinding();});
     tabs->addTab(makeRoutePanel(),"Modulation");
-    auto* monitor=new MonitorPanel([this](GraphMonitorFrame& frame){
+    auto* monitor=new MonitorPanel([this](GraphMonitorFrameV2& frame){
         auto* source=find_target(target_);if(!source)return false;
         calldata_t d;calldata_init(&d);calldata_set_ptr(&d,"frame",&frame);
-        bool ready=proc_handler_call(obs_source_get_proc_handler(source),"hyperdsp_graph_monitor_v1",&d)&&calldata_bool(&d,"available");
+        bool ready=proc_handler_call(obs_source_get_proc_handler(source),"hyperdsp_graph_monitor_v2",&d)&&calldata_bool(&d,"available");
         calldata_free(&d);obs_source_release(source);return ready;
     });
     tabs->addTab(monitor,"Monitor");

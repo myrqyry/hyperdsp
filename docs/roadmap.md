@@ -75,6 +75,8 @@ Standalone conventional audio effects and hosting for OBS, with optional inputs 
 
 - Frequency-selective Dynamic EQ / de-essing, linked peak detection, signed dynamic gain, eleven graph-bindable parameters and a qualified Vocal De Esser preset.
 
+- Live graph stereo vectorscope and observed spectrum difference, backwards-compatible V2 paired windows, theme-aware plots and stale clearing. Per-node gain/response/band telemetry remains next.
+
 ## Next layers
 
 - Unified discoverable effect library: favorites, native/installed external/community definitions, backend compatibility, descriptions, safe explicit acquisition and reusable presets. Reset/import/export and a compact native frequency-response view.

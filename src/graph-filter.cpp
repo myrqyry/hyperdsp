@@ -187,7 +187,16 @@ void monitor_read(void* ptr,calldata_t* data){
     if(!obs_source_enabled(f->source)){f->monitor.invalidate();return;}
     calldata_set_bool(data,"available",f->monitor.read(frame,os_gettime_ns()));
 }
-void* create(obs_data_t* s,obs_source_t* source){auto p=std::make_unique<Source>();p->source=source;proc_handler_add(obs_source_get_proc_handler(source),"void hyperdsp_graph_apply_v1(in string graph, in bool validate_only, out bool ok, out string status)",builder_apply,p.get());proc_handler_add(obs_source_get_proc_handler(source),"void hyperdsp_graph_monitor_v1(in ptr frame, out bool available)",monitor_read,p.get());update(p.get(),s);return p.release();}
+void monitor_read_v2(void* ptr,calldata_t* data){
+    auto* f=static_cast<Source*>(ptr);calldata_set_bool(data,"available",false);
+    void* raw=nullptr;
+    if(!f||!calldata_get_ptr(data,"frame",&raw)||!raw)return;
+    auto& frame=*static_cast<GraphMonitorFrameV2*>(raw);
+    if(frame.version!=2||frame.size!=sizeof(GraphMonitorFrameV2))return;
+    if(!obs_source_enabled(f->source)){f->monitor.invalidate();return;}
+    calldata_set_bool(data,"available",f->monitor.read(frame,os_gettime_ns()));
+}
+void* create(obs_data_t* s,obs_source_t* source){auto p=std::make_unique<Source>();p->source=source;proc_handler_add(obs_source_get_proc_handler(source),"void hyperdsp_graph_apply_v1(in string graph, in bool validate_only, out bool ok, out string status)",builder_apply,p.get());proc_handler_add(obs_source_get_proc_handler(source),"void hyperdsp_graph_monitor_v1(in ptr frame, out bool available)",monitor_read,p.get());proc_handler_add(obs_source_get_proc_handler(source),"void hyperdsp_graph_monitor_v2(in ptr frame, out bool available)",monitor_read_v2,p.get());update(p.get(),s);return p.release();}
 void destroy(void* p){delete static_cast<Source*>(p);}
 const char* name(void*){return "HyperDSP Graph";}
 bool restore_working_graph(obs_properties_t*,obs_property_t*,void* ptr){
@@ -232,7 +241,8 @@ obs_audio_data* process(void* ptr,obs_audio_data* audio){
     obs_audio_info ai{};
     if(!obs_get_audio_info(&ai)||ai.samples_per_sec!=f->rate||get_audio_channels(ai.speakers)!=f->channels){f->monitor.invalidate();return audio;}
     std::array<float*,8> p{};for(unsigned c=0;c<f->channels;++c)p[c]=reinterpret_cast<float*>(audio->data[c]);
-    bool capture=f->monitor.begin(p[0],audio->frames,f->rate,os_gettime_ns());
+    const float* right=f->channels==2?p[1]:nullptr;
+    bool capture=f->monitor.begin(p[0],audio->frames,f->rate,os_gettime_ns(),right);
     f->active->external_values(f->external.snapshot());
     f->active->process(p.data(),f->channels,audio->frames);
     if(capture){
@@ -245,7 +255,7 @@ obs_audio_data* process(void* ptr,obs_audio_data* audio){
             std::copy_n(name.data(),std::min<size_t>(name.size(),80),controls[i].name.data());
             controls[i].base=f->active->base_value(i);controls[i].effective=f->active->effective_value(i);
         }
-        f->monitor.end(p[0],audio->frames,os_gettime_ns(),controls,count);
+        f->monitor.end(p[0],audio->frames,os_gettime_ns(),controls,count,right);
     }
     return audio;
 }

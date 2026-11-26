@@ -54,7 +54,7 @@ Exposed-control verification: gain + hard clip macro produces sample 0.796214 at
 
 Multiband node native:hyperdsp_multiband_filter:1 uses phase-matched three-band compression. Crossover parameters low_hz and high_hz are base-only, not macro targets; dynamics and mix/trim parameters can be mapped. The reported fixed latency is zero, not zero phase: an external parallel dry branch is not phase-matched by the graph latency aligner. Use the node’s internal wet/dry for parallel compression.
 
-Stereo node native:hyperdsp_stereo_filter:1 requires a two-channel graph. Width, mid/side gains, balance and mix/trim are continuous macro targets. No fixed latency. The standalone filter provides a separate output diagnostic procedure; graph Monitor remains channel-1-only.
+Stereo node native:hyperdsp_stereo_filter:1 requires a two-channel graph. Width, mid/side gains, balance and mix/trim are continuous macro targets. No fixed latency. The standalone filter provides a separate output diagnostic procedure; graph Monitor now has paired stereo vectorscope and short-window stereo diagnostics; waveform/spectrum remain channel 1.
 
 Transient node native:hyperdsp_transient_filter:1 uses linked-channel envelope contrast and supports attack_db, sustain_db, attack_ms, sustain_ms, input_db, mix and output_db as macro targets. Zero fixed sample-buffer latency; nonlinear/time-varying preview uses the test tone rather than a transfer curve.
 

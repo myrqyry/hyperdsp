@@ -336,12 +336,26 @@ int main(int argc,char** argv){
                 monitored=monitored&&monitorStatus->text().startsWith("Live")&&meter->property("hasFrame").toBool();
                 if(qEnvironmentVariableIsSet("HYPERDSP_BUILDER_SCREENSHOT"))
                     builder.grab().save(qEnvironmentVariable("HYPERDSP_BUILDER_SCREENSHOT")+".monitor.png");
+                auto* view=builder.findChild<QComboBox*>("monitorView");
+                auto* detail=builder.findChild<QLabel*>("monitorDetail");
+                monitored=monitored&&view&&detail;
+                if(view&&detail){
+                    view->setCurrentIndex(1);QTest::qWait(30);
+                    monitored=monitored&&detail->text().contains("-1.000")&&detail->text().contains("-120.0");
+                    if(qEnvironmentVariableIsSet("HYPERDSP_BUILDER_SCREENSHOT"))
+                        builder.grab().save(qEnvironmentVariable("HYPERDSP_BUILDER_SCREENSHOT")+".stereo.png");
+                    view->setCurrentIndex(2);QTest::qWait(30);
+                    monitored=monitored&&detail->text().contains("not a transfer function");
+                    if(qEnvironmentVariableIsSet("HYPERDSP_BUILDER_SCREENSHOT"))
+                        builder.grab().save(qEnvironmentVariable("HYPERDSP_BUILDER_SCREENSHOT")+".difference.png");
+                    view->setCurrentIndex(1);
+                }
                 auto oldSize=builder.size();builder.resize(420,640);QTest::qWait(40);
                 if(qEnvironmentVariableIsSet("HYPERDSP_BUILDER_SCREENSHOT"))
                     builder.grab().save(qEnvironmentVariable("HYPERDSP_BUILDER_SCREENSHOT")+".monitor-narrow.png");
                 builder.resize(oldSize);
                 QTest::qWait(600);
-                monitored=monitored&&!meter->property("hasFrame").toBool()&&monitorStatus->text().contains("Waiting");
+                monitored=monitored&&!meter->property("hasFrame").toBool()&&monitorStatus->text().contains("Waiting")&&detail&&detail->text().isEmpty();
                 tabs->setCurrentIndex(3);
             }
             std::printf("BUILDER_MONITOR_PASS=%d\n",monitored);ok=ok&&monitored;
