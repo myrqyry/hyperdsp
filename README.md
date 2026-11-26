@@ -17,7 +17,13 @@ The first verified target is the microphone coloration filter: dynamic, condense
 
 ## Build and test (Linux)
 
-Requires a C++20 compiler, CMake, OBS development headers, libobs, Jansson development headers/library, and LADSPA SDK headers (on Mint: libjansson-dev and ladspa-sdk). Run `tests/verify.sh` for the DSP unit test and real OBS post-filter stereo capture test. No model, download, audio device or neural dependency is needed.
+Requires a C++20 compiler, CMake, OBS development headers, libobs, Jansson development headers/library, and LADSPA SDK headers (on Mint: libjansson-dev and ladspa-sdk; Clock Sync also uses libsamplerate0-dev). Run `tests/verify.sh` for the DSP unit test and real OBS post-filter stereo capture test. No model, download, audio device or neural dependency is needed.
+
+## Clock Sync
+
+**HyperDSP Clock Sync** is a standalone adaptive sample-rate filter for live hardware/network capture. It compensates small clock-rate differences before other DSP and neural filters; it is not a graph node because it changes packet length and timestamps. Choose source timestamps (default) or OBS arrival time, fast/medium/best sinc quality and a correction limit of 50–2000 ppm. Refresh diagnostics in the native OBS properties to read lock state, estimated correction, applied ratio, timing error and relocks.
+
+Clock Sync is built by default with libsamplerate; use -DHYPERDSP_BUILD_CLOCK_SYNC=OFF to omit it. Apply only to appropriate live sources, not local media files or sources whose clocks are already corrected. Independent monitoring-device clocks are not synchronized. See [Clock Sync design and verification](docs/clock-sync.md).
 
 ## Effect Builder dock
 

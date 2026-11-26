@@ -51,6 +51,8 @@ Standalone conventional audio effects and hosting for OBS, with optional inputs 
 
 - Theme-aware builder and Controls tab: OBS-inherited widget styles, live palette-derived graph colors, stable-ID macro authoring, cross-node parameter bindings and editable ranges, production apply verification.
 
+- Standalone adaptive Clock Sync utility with bounded correction, variable-frame resampling, timestamp continuity, diagnostics and synthetic-drift/real-libobs filter-chain tests.
+
 ## Next layers
 
 - Unified discoverable effect library: favorites, native/installed external/community definitions, backend compatibility, descriptions, safe explicit acquisition and reusable presets. Reset/import/export and a compact native frequency-response view.

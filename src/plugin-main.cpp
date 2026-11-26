@@ -15,6 +15,9 @@ extern "C" struct obs_source_info space_filter;
 extern "C" struct obs_source_info spectral_filter;
 extern "C" struct obs_source_info formant_filter;
 extern "C" struct obs_source_info graph_filter;
+#ifdef HYPERDSP_WITH_CLOCK_SYNC
+extern "C" struct obs_source_info clock_sync_filter;
+#endif
 OBS_DECLARE_MODULE()
 
 bool obs_module_load(void)
@@ -30,6 +33,9 @@ bool obs_module_load(void)
     obs_register_source(&spectral_filter);
     obs_register_source(&formant_filter);
     obs_register_source(&graph_filter);
+#ifdef HYPERDSP_WITH_CLOCK_SYNC
+    obs_register_source(&clock_sync_filter);
+#endif
 #ifdef HYPERDSP_WITH_BUILDER
     hyperdsp::register_effect_builder();
 #endif
