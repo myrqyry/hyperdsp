@@ -243,22 +243,69 @@ protected:
 };
 class NodeAnalysisPlot final:public QWidget {
     NodeTelemetry node_{};
-    unsigned rate_=0;
+    unsigned rate_=0,editRate_=0;
+    NodeTelemetry configured_{};
+    std::function<void(NodeTelemetry,unsigned,bool)> edit_;
+    bool dragging_=false;
+    QRectF eqArea()const{return QRectF(42,24,width()-51,height()-65);}
+    double high(unsigned rate)const{return std::min(20000.,rate*.45);}
+    QPointF point(double hz,double db,unsigned rate)const{
+        auto area=eqArea();
+        return {area.left()+area.width()*std::log(std::clamp(hz,20.,high(rate))/20)/std::log(high(rate)/20),
+            area.top()+area.height()*(12-std::clamp(db,-24.,12.))/36};
+    }
+    bool handleHit(QPointF pos)const{
+        return edit_&&editRate_&&QLineF(pos,point(configured_.frequency,configured_.gain_db[0],editRate_)).length()<=12;
+    }
+    void moveHandle(QPointF pos,bool finished){
+        auto area=eqArea();if(area.width()<24||area.height()<24)return;
+        double x=std::clamp((pos.x()-area.left())/area.width(),0.,1.);
+        double y=std::clamp((pos.y()-area.top())/area.height(),0.,1.);
+        configured_.frequency=float(std::round(20*std::pow(high(editRate_)/20,x)));
+        configured_.gain_db[0]=float(std::round((12-y*36)*10)/10);
+        update();edit_(configured_,3,finished);
+    }
 public:
     explicit NodeAnalysisPlot(QWidget* parent):QWidget(parent){setMinimumHeight(170);}
     void setNode(NodeTelemetry node,unsigned rate){node_=node;rate_=rate;update();}
     void clear(){setNode({},0);}
+    void setEditor(std::function<void(NodeTelemetry,unsigned,bool)> cb){edit_=std::move(cb);setMouseTracking(true);}
+    void setConfigured(NodeTelemetry n,unsigned rate){configured_=n;editRate_=rate;update();}
+    bool dragging()const{return dragging_;}
+    void cancelDrag(){dragging_=false;unsetCursor();}
+
 protected:
+    void mousePressEvent(QMouseEvent* e)override{
+        if(e->button()==Qt::LeftButton&&handleHit(e->position())){dragging_=true;setCursor(Qt::ClosedHandCursor);e->accept();return;}
+        QWidget::mousePressEvent(e);
+    }
+    void mouseMoveEvent(QMouseEvent* e)override{
+        if(dragging_){moveHandle(e->position(),false);e->accept();return;}
+        if(handleHit(e->position()))setCursor(Qt::OpenHandCursor);else unsetCursor();
+        QWidget::mouseMoveEvent(e);
+    }
+    void mouseReleaseEvent(QMouseEvent* e)override{
+        if(dragging_&&e->button()==Qt::LeftButton){dragging_=false;moveHandle(e->position(),true);setCursor(Qt::OpenHandCursor);e->accept();return;}
+        QWidget::mouseReleaseEvent(e);
+    }
+    void wheelEvent(QWheelEvent* e)override{
+        if(handleHit(e->position())&&e->angleDelta().y()){
+            configured_.q=float(std::round(std::clamp(configured_.q*std::pow(1.15,e->angleDelta().y()/120.),.25,12.)*100)/100);
+            update();edit_(configured_,4,true);e->accept();return;
+        }
+        QWidget::wheelEvent(e);
+    }
     void paintEvent(QPaintEvent*)override{
         QPainter p(this);p.setRenderHint(QPainter::Antialiasing);GraphColors c(palette());
         p.fillRect(rect(),c.base);p.setPen(c.text);
-        if(node_.kind==TelemetryKind::None){p.drawText(rect(),Qt::AlignCenter,"No supported node telemetry");return;}
+        if(node_.kind==TelemetryKind::None&&!editRate_){p.drawText(rect(),Qt::AlignCenter,"No supported node telemetry");return;}
         QColor grid=blend(c.base,c.text,.18);
-        if(node_.kind==TelemetryKind::DynamicEq){
-            QRectF area(42,24,width()-51,height()-65);
+        if(node_.kind==TelemetryKind::DynamicEq||editRate_){
+            QRectF area=eqArea();
             if(area.width()<24||area.height()<24)return;
-            p.drawText(QRectF(4,1,width()-8,20),Qt::AlignLeft,"Frozen wet EQ response · dB");
-            const double high=std::min(20000.,rate_*.49);
+            p.drawText(QRectF(4,1,width()-8,20),Qt::AlignLeft,editRate_?"Limit (dashed) / live (solid) · dB":"Frozen wet EQ response · dB");
+            const unsigned rate=editRate_?editRate_:rate_;
+            const double high=this->high(rate);
             auto x=[&](double f){return area.left()+area.width()*std::log(f/20)/std::log(high/20);};
             auto y=[&](double db){return area.top()+area.height()*(12-std::clamp(db,-24.,12.))/36;};
             for(int db:{12,0,-12,-24}){
@@ -269,16 +316,27 @@ protected:
                 p.setPen(grid);p.drawLine(QPointF(x(hz),area.top()),QPointF(x(hz),area.bottom()));
                 p.setPen(c.text);p.drawText(QRectF(x(hz)-18,area.bottom()+1,36,16),Qt::AlignCenter,hz>=1000?QString::number(hz/1000)+"k":QString::number(hz));
             }
-            QPainterPath path;
-            for(int i=0;i<=200;++i){
-                double hz=20*std::pow(high/20,i/200.);
-                QPointF pt(x(hz),y(dynamic_eq_frozen_db(node_,rate_,hz)));
-                if(i==0)path.moveTo(pt);else path.lineTo(pt);
+            auto curve=[&](const NodeTelemetry& n,QColor color,Qt::PenStyle style){
+                QPainterPath path;
+                for(int i=0;i<=200;++i){
+                    double hz=20*std::pow(high/20,i/200.);
+                    QPointF pt(x(hz),y(dynamic_eq_frozen_db(n,rate,hz)));
+                    if(i==0)path.moveTo(pt);else path.lineTo(pt);
+                }
+                p.setPen(QPen(color,2,style));p.drawPath(path);
+            };
+            if(node_.kind==TelemetryKind::DynamicEq&&rate_==rate){
+                curve(node_,c.accent,Qt::SolidLine);
+                if(node_.frequency>=20&&node_.frequency<=high)p.drawEllipse(QPointF(x(node_.frequency),y(node_.gain_db[0])),3,3);
             }
-            p.setPen(QPen(c.accent,2));p.drawPath(path);
-            if(node_.frequency>=20&&node_.frequency<=high)p.drawEllipse(QPointF(x(node_.frequency),y(node_.gain_db[0])),3,3);
+            if(editRate_){
+                curve(configured_,c.edge,Qt::DashLine);
+                auto handle=point(configured_.frequency,configured_.gain_db[0],rate);
+                p.setPen(QPen(c.edge,2));p.setBrush(c.base);p.drawEllipse(handle,6,6);p.setBrush(Qt::NoBrush);
+            }
+            const auto& shown=editRate_?configured_:node_;
             p.setPen(c.text);p.drawText(QRectF(4,height()-23,width()-8,20),Qt::AlignCenter,
-                QString("%1 Hz · Q %2").arg(node_.frequency,0,'f',0).arg(node_.q,0,'f',2));
+                QString("%1 Hz · Q %2").arg(shown.frequency,0,'f',0).arg(shown.q,0,'f',2));
             return;
         }
         unsigned count=node_.kind==TelemetryKind::Multiband?3:1;
@@ -304,7 +362,65 @@ class FilterAnalysisDialog final:public QDialog {
     NodeAnalysisPlot* plot_;
     QLabel* status_;
     QLabel* detail_;
-    QTimer timer_;
+    QTimer timer_,editTimer_;
+    QDoubleSpinBox *frequency_=nullptr,*range_=nullptr,*q_=nullptr;
+    unsigned pending_=0,configRate_=48000;
+    bool refreshPending_=false;
+    NodeTelemetry config_{};
+    void syncControls(){
+        if(!frequency_)return;
+        QSignalBlocker f(frequency_),r(range_),q(q_);
+        auto typing=[](QDoubleSpinBox* spin){
+            auto* line=spin->findChild<QLineEdit*>();
+            return spin->hasFocus()&&line&&line->isModified();
+        };
+        if(!typing(frequency_)){
+            frequency_->setMaximum(std::floor(std::min(20000.,configRate_*.45)));
+            frequency_->setValue(config_.frequency);
+        }
+        if(!typing(range_))range_->setValue(config_.gain_db[0]);
+        if(!typing(q_))q_->setValue(config_.q);
+        plot_->setConfigured(config_,configRate_);
+    }
+    void readConfig(obs_source_t* source){
+        if(!frequency_||pending_||plot_->dragging())return;
+        auto* settings=obs_source_get_settings(source);
+        obs_audio_info ai{};if(obs_get_audio_info(&ai)&&ai.samples_per_sec>=8000&&ai.samples_per_sec<=192000)configRate_=ai.samples_per_sec;
+        config_.kind=TelemetryKind::DynamicEq;
+        config_.frequency=float(MixSettings::bounded(obs_data_get_double(settings,"frequency"),20,std::min(20000.,configRate_*.45),1000));
+        config_.gain_db[0]=float(MixSettings::bounded(obs_data_get_double(settings,"range_db"),-24,12,-6));
+        config_.q=float(MixSettings::bounded(obs_data_get_double(settings,"q"),.25,12,2));
+        obs_data_release(settings);syncControls();
+    }
+    void flush(bool refresh){
+        editTimer_.stop();
+        auto* source=obs_weak_source_get_source(weak_);
+        if(!source){pending_=0;return;}
+        if(pending_){
+            auto* changes=obs_data_create();
+            auto* current=obs_source_get_settings(source);
+            bool changed=false;
+            auto field=[&](unsigned bit,const char* key,double value){
+                if((pending_&bit)&&std::abs(obs_data_get_double(current,key)-value)>1e-5){
+                    obs_data_set_double(changes,key,value);changed=true;
+                }
+            };
+            field(1,"frequency",config_.frequency);field(2,"range_db",config_.gain_db[0]);field(4,"q",config_.q);
+            obs_data_release(current);pending_=0;
+            if(changed){obs_source_update(source,changes);refreshPending_=true;}
+            obs_data_release(changes);
+        }
+        if(refresh&&refreshPending_){refreshPending_=false;obs_source_update_properties(source);}
+        obs_source_release(source);
+    }
+    void queueEdit(NodeTelemetry n,unsigned fields,bool finished){
+        if(fields&1)config_.frequency=n.frequency;
+        if(fields&2)config_.gain_db[0]=n.gain_db[0];
+        if(fields&4)config_.q=n.q;
+        pending_|=fields;syncControls();
+        if(finished)flush(true);else if(!editTimer_.isActive())editTimer_.start(33);
+    }
+
     void clear(){plot_->clear();status_->setText("Waiting for active filter audio");detail_->clear();}
     void poll(){
         auto* source=obs_weak_source_get_source(weak_);
@@ -314,7 +430,7 @@ class FilterAnalysisDialog final:public QDialog {
         bool ready=proc_handler_call(obs_source_get_proc_handler(source),"hyperdsp_filter_telemetry_v1",&d)&&calldata_bool(&d,"available");
         calldata_free(&d);
         setWindowTitle(QString("HyperDSP · %1").arg(QString::fromUtf8(obs_source_get_name(source))));
-        obs_source_release(source);
+        readConfig(source);obs_source_release(source);
         if(!ready||frame.rate<8000||frame.rate>192000||frame.node.kind==TelemetryKind::None){clear();return;}
         const auto& n=frame.node;plot_->setNode(n,frame.rate);
         status_->setText(QString("Live · %1 kHz").arg(frame.rate/1000.,0,'g',4));
@@ -329,17 +445,42 @@ public:
         setObjectName("hyperdspFilterAnalysis");setAttribute(Qt::WA_DeleteOnClose);setModal(false);
         auto* layout=new QVBoxLayout(this);layout->setContentsMargins(8,8,8,8);layout->setSpacing(5);
         status_=new QLabel;status_->setObjectName("filterAnalysisStatus");status_->setTextFormat(Qt::PlainText);layout->addWidget(status_);
-        plot_=new NodeAnalysisPlot(this);layout->addWidget(plot_,1);
+        plot_=new NodeAnalysisPlot(this);plot_->setObjectName("filterAnalysisPlot");layout->addWidget(plot_,1);
+        if(std::string_view(obs_source_get_id(source))=="hyperdsp_dynamic_eq_filter"){
+            auto* row=new QHBoxLayout;row->setSpacing(6);
+            auto control=[&](const char* label,const char* id,double lo,double hi,double step,int decimals,const char* suffix){
+                auto* column=new QVBoxLayout;column->setSpacing(2);
+                auto* caption=new QLabel(label);auto* spin=new QDoubleSpinBox;
+                spin->setObjectName(id);spin->setRange(lo,hi);spin->setDecimals(decimals);spin->setSingleStep(step);spin->setSuffix(suffix);spin->setKeyboardTracking(false);
+                caption->setBuddy(spin);column->addWidget(caption);column->addWidget(spin);row->addLayout(column,1);return spin;
+            };
+            frequency_=control("Frequency","eqFrequency",20,20000,1,0," Hz");
+            range_=control("Gain limit","eqRange",-24,12,.1,1," dB");
+            q_=control("Bandwidth Q","eqQ",.25,12,.05,2,"");
+            layout->addLayout(row);
+            auto* hint=new QLabel("Drag the hollow handle · scroll over it to change Q");hint->setWordWrap(true);layout->addWidget(hint);
+            plot_->setMinimumHeight(190);
+            plot_->setEditor([this](NodeTelemetry n,unsigned fields,bool finished){queueEdit(n,fields,finished);});
+            editTimer_.setSingleShot(true);connect(&editTimer_,&QTimer::timeout,this,[this]{flush(false);});
+            readConfig(source);
+            connect(frequency_,&QDoubleSpinBox::valueChanged,this,[this](double v){auto n=config_;n.frequency=float(std::min(v,configRate_*.45));queueEdit(n,1,false);});
+            connect(range_,&QDoubleSpinBox::valueChanged,this,[this](double v){auto n=config_;n.gain_db[0]=float(v);queueEdit(n,2,false);});
+            connect(q_,&QDoubleSpinBox::valueChanged,this,[this](double v){auto n=config_;n.q=float(v);queueEdit(n,4,false);});
+            for(auto* spin:{frequency_,range_,q_})connect(spin,&QDoubleSpinBox::editingFinished,this,[this,spin]{
+                if(auto* line=spin->findChild<QLineEdit*>())line->setModified(false);
+                flush(true);syncControls();
+            });
+        }
         detail_=new QLabel;detail_->setTextFormat(Qt::PlainText);detail_->setWordWrap(true);layout->addWidget(detail_);
-        auto* closeButton=new QPushButton("Close",this);connect(closeButton,&QPushButton::clicked,this,&QDialog::close);layout->addWidget(closeButton);
-        clear();resize(480,320);
+        auto* closeButton=new QPushButton("Close",this);closeButton->setAutoDefault(false);closeButton->setDefault(false);connect(closeButton,&QPushButton::clicked,this,&QDialog::close);layout->addWidget(closeButton);
+        clear();resize(480,frequency_?390:320);
         timer_.setInterval(50);connect(&timer_,&QTimer::timeout,this,[this]{poll();});
     }
-    ~FilterAnalysisDialog()override{timer_.stop();obs_weak_source_release(weak_);}
+    ~FilterAnalysisDialog()override{timer_.stop();editTimer_.stop();obs_weak_source_release(weak_);}
     bool matches(obs_source_t* source)const{return obs_weak_source_references_source(weak_,source);}
 protected:
     void showEvent(QShowEvent* event)override{QDialog::showEvent(event);timer_.start();poll();}
-    void hideEvent(QHideEvent* event)override{timer_.stop();clear();QDialog::hideEvent(event);}
+    void hideEvent(QHideEvent* event)override{timer_.stop();if(pending_||refreshPending_)flush(true);plot_->cancelDrag();clear();QDialog::hideEvent(event);}
 };
 std::vector<QPointer<FilterAnalysisDialog>> filterDialogs;
 class MonitorPanel final:public QWidget {

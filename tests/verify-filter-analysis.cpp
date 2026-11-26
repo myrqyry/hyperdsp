@@ -6,6 +6,9 @@
 #include <QLabel>
 #include <QTest>
 #include <QPointer>
+#include <QDoubleSpinBox>
+#include <QLineEdit>
+#include <QWheelEvent>
 #include <array>
 #include <numbers>
 #include <cstdio>
@@ -25,7 +28,7 @@ int main(int argc,char** argv){
     auto* source=obs_source_create("analysis_test_input","Analysis test",nullptr,nullptr);
     bool ok=true;unsigned samples=0;auto start=os_gettime_ns();
     for(auto id:{"hyperdsp_dynamic_eq_filter","hyperdsp_dynamics_filter","hyperdsp_multiband_filter"}){
-        auto* s=obs_data_create();obs_data_set_double(s,"frequency",1500);obs_data_set_double(s,"threshold",-30);obs_data_set_double(s,"range_db",-9);
+        bool prior=ok;ok=true;auto* s=obs_data_create();obs_data_set_double(s,"frequency",1500);obs_data_set_double(s,"threshold",-30);obs_data_set_double(s,"range_db",-9);
         obs_data_set_double(s,"mid_threshold",-30);obs_data_set_double(s,"mid_ratio",4);obs_data_set_double(s,"low_ratio",1);obs_data_set_double(s,"high_ratio",1);
         auto* f=obs_source_create_private(id,"Test filter",s);obs_source_filter_add(source,f);
         FilterTelemetryFrame frame{};
@@ -59,6 +62,46 @@ int main(int argc,char** argv){
             auto* status=dialog->findChild<QLabel*>("filterAnalysisStatus");ok=ok&&status&&status->text().startsWith("Live");
             dialog->resize(360,300);QTest::qWait(30);
             if(qEnvironmentVariableIsSet("HYPERDSP_FILTER_SCREENSHOT"))dialog->grab().save(qEnvironmentVariable("HYPERDSP_FILTER_SCREENSHOT")+"."+id+".png");
+            if(n.kind==TelemetryKind::DynamicEq){
+                auto* plot=dialog->findChild<QWidget*>("filterAnalysisPlot");
+                auto* freq=dialog->findChild<QDoubleSpinBox*>("eqFrequency");
+                auto* depth=dialog->findChild<QDoubleSpinBox*>("eqRange");
+                auto* q=dialog->findChild<QDoubleSpinBox*>("eqQ");
+                ok=ok&&plot&&freq&&depth&&q;
+                if(plot&&freq&&depth&&q){
+                    QRectF area(42,24,plot->width()-51,plot->height()-65);
+                    auto point=[&](double hz,double db){return QPointF(area.left()+area.width()*std::log(hz/20)/std::log(1000.),area.top()+area.height()*(12-db)/36).toPoint();};
+                    auto before=point(1500,-9),after=point(3000,-15);
+                    QTest::mousePress(plot,Qt::LeftButton,Qt::NoModifier,before);
+                    QTest::mouseMove(plot,after,40);QTest::qWait(60);
+                    auto* live=obs_source_get_settings(f);
+                    bool moving=std::abs(obs_data_get_double(live,"frequency")-3000)<100&&std::abs(obs_data_get_double(live,"range_db")+15)<.5;
+                    obs_data_release(live);ok=ok&&moving;
+                    QTest::mouseRelease(plot,Qt::LeftButton,Qt::NoModifier,after);
+                    QWheelEvent wheel(QPointF(after),plot->mapToGlobal(after),QPoint(),QPoint(0,120),Qt::NoButton,Qt::NoModifier,Qt::NoScrollPhase,false);
+                    QApplication::sendEvent(plot,&wheel);QTest::qWait(80);
+                    live=obs_source_get_settings(f);std::printf("EQ_WHEEL q=%g threshold=%g\n",obs_data_get_double(live,"q"),obs_data_get_double(live,"threshold"));ok=ok&&obs_data_get_double(live,"q")>2&&obs_data_get_double(live,"threshold")==-30;obs_data_release(live);
+                    // Configure numerically and confirm a separate settings edit is reflected.
+                    freq->setValue(1500);depth->setValue(-12);q->setValue(2);QTest::qWait(90);
+                    stream();QTest::qWait(70);bool got=read();std::printf("EQ_NUMERIC ready=%d gain=%g freq=%g q=%g\n",got,frame.node.gain_db[0],frame.node.frequency,frame.node.q);ok=ok&&got&&std::abs(frame.node.gain_db[0]+12)<.02;
+                    live=obs_source_get_settings(f);obs_data_set_double(live,"frequency",1800);obs_source_update(f,live);obs_data_release(live);
+                    QTest::qWait(80);std::printf("EQ_EXTERNAL freq=%g\n",freq->value());ok=ok&&freq->value()==1800;
+                    auto* line=freq->findChild<QLineEdit*>();
+                    ok=ok&&line;
+                    if(line){
+                        freq->setFocus();line->selectAll();QTest::keyClicks(line,"2200");
+                        QTest::qWait(100);ok=ok&&line->text().contains("2200");
+                        QTest::keyClick(line,Qt::Key_Return);QTest::qWait(80);
+                        if(!dialog){std::fprintf(stderr,"EQ_EDITOR dialog closed on numeric Enter\n");return 1;}
+                        live=obs_source_get_settings(f);ok=ok&&obs_data_get_double(live,"frequency")==2200;obs_data_release(live);
+                    }
+                    // Editing remains possible without fresh audio.
+                    QTest::qWait(550);depth->setValue(-6);QTest::qWait(80);
+                    live=obs_source_get_settings(f);std::printf("EQ_STALE_EDIT range=%g\n",obs_data_get_double(live,"range_db"));ok=ok&&obs_data_get_double(live,"range_db")==-6;obs_data_release(live);
+                    freq->setValue(1500);depth->setValue(-9);QTest::qWait(80);
+                    std::printf("EQ_EDITOR drag_live=%d frequency=%g range=%g q=%g pass=%d\n",moving,freq->value(),depth->value(),q->value(),ok);
+                }
+            }
             dialog->hide();QTest::qWait(1050);
             // A hidden window stops renewing its capture lease. Sending audio
             // before the next read must not produce a fresh snapshot.
@@ -72,7 +115,7 @@ int main(int argc,char** argv){
         stream();QTest::qWait(550);ok=ok&&!read();
         obs_properties_destroy(props);obs_source_filter_remove(source,f);obs_source_release(f);obs_data_release(s);
         QTest::qWait(150);ok=ok&&!dialog;
-        std::printf("FILTER_ANALYSIS %s gain=%g/%g pass=%d\n",id,n.gain_db[0],n.gain_db[1],ok);
+        std::printf("FILTER_ANALYSIS %s gain=%g/%g pass=%d\n",id,n.gain_db[0],n.gain_db[1],ok);ok=ok&&prior;
     }
     obs_source_release(source);obs_shutdown();return ok?0:1;
 }

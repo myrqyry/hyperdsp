@@ -94,7 +94,7 @@ Numerical and real libobs tests cover static curves, stereo linkage, soft knee, 
 
 ## Standalone live analysis
 
-The native **HyperDSP Dynamics**, **Multiband**, and **Dynamic EQ** filter properties include **Open live analysis** when the optional Qt frontend is built. The modeless window follows that exact filter and uses the same plots as the Effect Builder: actual detector peaks and smoothed gain reduction, independent band meters, or a frozen wet Dynamic EQ curve. It stops polling when hidden and closes when its source is destroyed. DSP-only builds retain the telemetry procedure without a GUI dependency. See [standalone analysis](docs/filter-analysis.md).
+The native **HyperDSP Dynamics**, **Multiband**, and **Dynamic EQ** filter properties include **Open live analysis** when the optional Qt frontend is built. The modeless window follows that exact filter and uses the same plots as the Effect Builder. Dynamic EQ additionally supports a draggable frequency/gain-limit handle, scroll-to-adjust Q, and numeric parameter editing directly in the window. Visualizations include: actual detector peaks and smoothed gain reduction, independent band meters, or a frozen wet Dynamic EQ curve. It stops polling when hidden and closes when its source is destroyed. DSP-only builds retain the telemetry procedure without a GUI dependency. See [standalone analysis](docs/filter-analysis.md).
 
 ## Dynamic EQ / de-essing
 
