@@ -67,6 +67,8 @@ Standalone conventional audio effects and hosting for OBS, with optional inputs 
 
 - Three-band Linkwitz–Riley compressor with phase-matched internal wet/dry, independent band dynamics and reusable crossover, standalone filter and graph metadata.
 
+- Stereo imaging with mid/side gain, width/balance, shared graph parameters and standalone output correlation/mono-fold diagnostics.
+
 ## Next layers
 
 - Unified discoverable effect library: favorites, native/installed external/community definitions, backend compatibility, descriptions, safe explicit acquisition and reusable presets. Reset/import/export and a compact native frequency-response view.

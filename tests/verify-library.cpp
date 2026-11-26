@@ -41,6 +41,7 @@ int main(int argc,char** argv){
         parity("hyperdsp_spectral_filter",hyperdsp::SpectralSettings{},hyperdsp::spectral_parameters)&&
         parity("hyperdsp_mic_filter",hyperdsp::MicSettings{},hyperdsp::mic_parameters)&&
         parity("hyperdsp_native_filter",hyperdsp::FilterSettings{},hyperdsp::native_parameters)&&
+        parity("hyperdsp_stereo_filter",hyperdsp::StereoSettings{},hyperdsp::stereo_parameters)&&
         parity("hyperdsp_multiband_filter",hyperdsp::MultibandSettings{},hyperdsp::multiband_crossovers)&&
         parity("hyperdsp_multiband_filter",hyperdsp::MultibandSettings{},hyperdsp::multiband_parameters)&&
         parity("hyperdsp_dynamics_filter",hyperdsp::DynamicsSettings{},hyperdsp::dynamics_parameters)&&
@@ -53,10 +54,10 @@ int main(int argc,char** argv){
         ok=ok&&ids.insert(e.id).second&&!e.name.empty()&&!e.category.empty();
         if(e.format=="native")++native;else if(e.format=="ladspa")++external;
     }
-    ok=ok&&native==modes&&native==39&&external==2;
+    ok=ok&&native==modes&&native==40&&external==2;
     auto mono=hyperdsp::effect_library(hyperdsp::read_catalog(argv[3]),1);
     unsigned incompatible=0;for(auto& e:mono)if(!e.compatible)++incompatible;
-    ok=ok&&incompatible==1;
+    ok=ok&&incompatible==2;
     auto matched=hyperdsp::search_effects(entries,"amplifier mono","ladspa");
     ok=ok&&matched.size()==1&&matched[0].label=="amp_mono";
     matched=hyperdsp::search_effects(entries,"freeze spectral","native");

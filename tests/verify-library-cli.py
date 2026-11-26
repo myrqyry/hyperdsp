@@ -7,10 +7,10 @@ cli, catalog = sys.argv[1:]
 def run(*args):
     return json.loads(subprocess.check_output([cli, "--catalog", catalog, "--json", *args], text=True))
 result=run()
-assert result["schema"]==1 and len(result["effects"])==41
-assert sum(e["format"]=="native" for e in result["effects"])==39
-assert len({e["id"] for e in result["effects"]})==41
-assert sum(e["graph_supported"] for e in result["effects"])==41
+assert result["schema"]==1 and len(result["effects"])==42
+assert sum(e["format"]=="native" for e in result["effects"])==40
+assert len({e["id"] for e in result["effects"]})==42
+assert sum(e["graph_supported"] for e in result["effects"])==42
 color=next(e for e in result["effects"] if e["id"]=="native:hyperdsp_color_filter:3")
 params={p["key"]:p for p in color["parameters"]}
 assert params["drive"]["min"]==-24 and params["drive"]["max"]==36 and params["drive"]["default"]==0
@@ -18,6 +18,8 @@ assert [c["value"] for c in params["oversample"]["choices"]]==[1,2,4]
 assert result["graph_utilities"][0]["id"]=="gain"
 multiband=next(e for e in result["effects"] if e["id"]=="native:hyperdsp_multiband_filter:1")
 mb={p["key"]:p for p in multiband["parameters"]}
+stereo=next(e for e in run("--channels","1")["effects"] if e["source"]=="hyperdsp_stereo_filter")
+assert not stereo["compatible"] and len(stereo["parameters"])==7
 assert len(mb)==17 and not mb["low_hz"]["bindable"] and mb["low_ratio"]["bindable"]
 amp=next(e for e in result["effects"] if e.get("label")=="amp_mono")
 assert amp["controls_complete"] and amp["latency_known"] is False
@@ -44,9 +46,9 @@ with tempfile.TemporaryDirectory() as temp:
     data["effects"].append(data["effects"][0])
     path.write_text(json.dumps(data))
     stale=json.loads(subprocess.check_output([cli,"--catalog",str(path),"--json"],text=True))
-    assert len(stale["effects"])==41
+    assert len(stale["effects"])==42
     assert sum(not e["compatible"] for e in stale["effects"])==1
     missing=json.loads(subprocess.check_output([cli,"--catalog",str(Path(temp)/"absent.json"),"--json"],text=True))
-    assert len(missing["effects"])==39
+    assert len(missing["effects"])==40
 assert subprocess.run([cli,"--channels","0"],capture_output=True).returncode==2
 print("LIBRARY_CLI_PASS=1")

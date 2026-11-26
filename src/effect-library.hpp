@@ -30,6 +30,7 @@ inline constexpr NativeMode dynamics_modes[]={
     {2,"Downward expander","Dynamics","Attenuate quieter signals"},
     {3,"Noise gate","Dynamics","Gate with hold and hysteresis"},
     {4,"Sample-peak limiter","Dynamics","Immediate wet-branch sample attenuation; not true peak"}};
+inline constexpr NativeMode stereo_modes[]={{0,"Bypass","Utility","Unprocessed audio"},{1,"Stereo imaging","Stereo","Mid/side gain, width and balance"}};
 inline constexpr NativeMode multiband_modes[]={{0,"Bypass","Utility","Unprocessed audio"},{1,"Three-band compressor","Dynamics","Phase-matched crossover with independent band compression"}};
 inline constexpr NativeMode color_modes[]={
     {0,"Bypass","Utility","Unprocessed audio"},
@@ -64,6 +65,7 @@ inline constexpr NativeFamily native_families[]={
     {"hyperdsp_mic_filter","HyperDSP Microphone DSP","mic_type",mic_modes},
     {"hyperdsp_native_filter","HyperDSP Filter","mode",filter_modes},
     {"hyperdsp_dynamics_filter","HyperDSP Dynamics","mode",dynamics_modes},
+    {"hyperdsp_stereo_filter","HyperDSP Stereo","mode",stereo_modes},
     {"hyperdsp_multiband_filter","HyperDSP Multiband","mode",multiband_modes},
     {"hyperdsp_color_filter","HyperDSP Color","mode",color_modes},
     {"hyperdsp_time_filter","HyperDSP Time","mode",time_modes},
@@ -87,7 +89,7 @@ inline std::vector<EffectEntry> effect_library(const Catalog& catalog,unsigned c
         EffectEntry e;e.id=std::string("native:")+(std::string_view(family.source)=="hyperdsp_mic_filter"?"mic_modeler_filter":family.source)+":"+std::to_string(m.value);
         e.name=m.name;e.category=m.category;e.description=m.description;e.format="native";
         e.source=family.source;e.mode_key=family.mode_key;e.mode=m.value;e.maker="HyperDSP";
-        e.compatible=channels>=1&&channels<=8;
+        e.compatible=channels>=1&&channels<=8&&(e.source!="hyperdsp_stereo_filter"||channels==2);
         entries.push_back(std::move(e));
     }
     for(auto& plugin:catalog){

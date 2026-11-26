@@ -7,6 +7,7 @@
 #include "space.hpp"
 #include "formant.hpp"
 #include "multiband.hpp"
+#include "stereo.hpp"
 #include <map>
 #include <string>
 #include <string_view>
@@ -60,6 +61,14 @@ inline constexpr FloatParameter<DynamicsSettings> dynamics_parameters[]={
     {"input_db","Input gain",-24,24,.1," dB",&DynamicsSettings::input_db},
     {"mix","Wet / dry",0,1,.01,"",&DynamicsSettings::wet},
     {"output_db","Output gain",-24,24,.1," dB",&DynamicsSettings::output_db}};
+inline constexpr FloatParameter<StereoSettings> stereo_parameters[]={
+    {"width","Stereo width",0,2,.01," ×",&StereoSettings::width},
+    {"mid_db","Mid gain",-24,24,.1," dB",&StereoSettings::mid_db},
+    {"side_db","Side gain",-24,24,.1," dB",&StereoSettings::side_db},
+    {"balance","Balance",-1,1,.01,"",&StereoSettings::balance},
+    {"input_db","Input gain",-24,24,.1," dB",&StereoSettings::input_db},
+    {"mix","Wet / dry",0,1,.01,"",&StereoSettings::wet},
+    {"output_db","Output gain",-24,24,.1," dB",&StereoSettings::output_db}};
 inline constexpr FloatParameter<MultibandSettings> multiband_crossovers[]={
     {"low_hz","Low crossover",60,500,1," Hz",&MultibandSettings::low_hz},
     {"high_hz","High crossover",1000,8000,1," Hz",&MultibandSettings::high_hz}};

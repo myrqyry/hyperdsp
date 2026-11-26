@@ -35,7 +35,7 @@ Drag node bodies to arrange the canvas, and drag an output port to an input port
 
 ## Effect graph runtime
 
-**HyperDSP Graph** is an initial executable serial/parallel effect graph filter. Its versioned JSON definition is editable in OBS filter properties; the graphical Effect Builder is available through the optional Qt dock. The graph supports all 39 native processing modes across nine families, and a gain/weighted-sum utility. Scanned compatible LADSPA effects can also be used as graph nodes or standalone filters. External native code is trusted code, not sandboxed.
+**HyperDSP Graph** is an initial executable serial/parallel effect graph filter. Its versioned JSON definition is editable in OBS filter properties; the graphical Effect Builder is available through the optional Qt dock. The graph supports all 40 native processing modes across ten families, and a gain/weighted-sum utility. Scanned compatible LADSPA effects can also be used as graph nodes or standalone filters. External native code is trusted code, not sandboxed.
 
 The graph has a single audio input (source index -1), up to 16 nodes and 32 weighted edges, and a selected output. It rejects cycles, disconnected nodes, unsupported effects, non-finite/out-of-range parameters and invalid connections. Parallel paths are aligned to the greatest fixed algorithmic latency at each merge, including Color oversampling and Spectral FFT buffering. Valid graphs are prepared off the audio callback and swapped in; an invalid edit retains the previous active graph; OBS saves its last accepted definition and base control values for recovery on reload. The callback processes bounded chunks with preallocated buffers. A valid replacement resets graph state, and an update collision can briefly bypass; there is no crossfade or scene-wide timestamp alignment.
 
@@ -91,6 +91,10 @@ The limiter uses immediate attenuation and release smoothing, with a final wet-b
 All four shared modulation routes are available, including optional Sound and Sight signals. Destinations are threshold, ratio, makeup, attenuation range, mix and output amplitude, with signed amounts in destination units and per-destination bounds. Only parameters used by the current dynamics mode affect processing. A reusable OBS route-property helper supports future native effect adapters.
 
 Numerical and real libobs tests cover static curves, stereo linkage, soft knee, gate hold/hysteresis, sample ceiling across 44.1/48/96 kHz, nonfinite sample handling, bypass and Sound-driven attenuation using the versioned contract fixture. See [dynamics verification](docs/dynamics.md).
+
+## Stereo imaging
+
+**HyperDSP Stereo** provides width (0–2×), mid and side gains, balance, wet/dry and trim. Width zero folds stereo to its mono sum; widening changes the side component without changing the mid component unless other controls are adjusted. The native filter and graph node use the same ramped, zero-buffer-latency engine. Stereo-only: standalone bypasses other layouts; graphs reject them. Refresh diagnostics in native OBS properties to inspect output correlation, mono-fold power loss and side energy. These measurements are not a guarantee of mono compatibility or a limiter. See [stereo design and tests](docs/stereo.md).
 
 ## Multiband compression
 
@@ -166,7 +170,7 @@ The adapter validates procedure version, buffer size, sequence, dimensions, kind
 
 ### Unified effect inventory
 
-The shared native mode registry drives all nine native OBS filter selectors and lists 39 processing modes (excluding bypass). The `hyperdsp-effects` tool combines this registry with the local scanned LADSPA catalog, without opening any plugin or starting OBS:
+The shared native mode registry drives all ten native OBS filter selectors and lists 40 processing modes (excluding bypass). The `hyperdsp-effects` tool combines this registry with the local scanned LADSPA catalog, without opening any plugin or starting OBS:
 
 ```sh
 build/hyperdsp-effects --search "pitch"
