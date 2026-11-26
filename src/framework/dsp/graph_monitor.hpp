@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cmath>
 #include <mutex>
+#include "node_telemetry.hpp"
 namespace hyperdsp {
 inline constexpr unsigned monitor_samples=1024;
 struct GraphMonitorControl {
@@ -27,13 +28,19 @@ struct GraphMonitorFrameV2 {
     bool stereo=false;
     std::array<float,monitor_samples> input_right{},output_right{};
 };
+struct GraphMonitorFrameV3 {
+    uint32_t version=3,size=sizeof(GraphMonitorFrameV3);
+    GraphMonitorFrameV2 audio{};
+    unsigned node_count=0;
+    NodeTelemetryArray nodes{};
+};
 class GraphMonitor {
     static constexpr uint64_t lease_ns=1000000000ULL, fresh_ns=500000000ULL;
     std::atomic<uint64_t> requested_{0},epoch_{1};
     std::mutex snapshot_mutex_;
-    GraphMonitorFrameV2 published_{};
+    GraphMonitorFrameV3 published_{};
     // Audio thread only, while the graph processing lock is held.
-    GraphMonitorFrameV2 staging_{};
+    GraphMonitorFrameV3 staging_{};
     std::array<float,monitor_samples> pending_{},pending_right_{};
     unsigned used_=0,take_=0;
     uint64_t seen_epoch_=0,sequence_=0;
@@ -41,17 +48,24 @@ class GraphMonitor {
 public:
     static_assert(std::atomic<uint64_t>::is_always_lock_free);
     void invalidate(){epoch_.fetch_add(1);}
+    bool read(GraphMonitorFrameV3& frame,uint64_t now){
+        requested_.store(now);
+        std::lock_guard lock(snapshot_mutex_);
+        const auto& v=published_.audio.signal;
+        if(!v.stamp||v.epoch!=epoch_.load()||now<v.stamp||now-v.stamp>fresh_ns)return false;
+        frame=published_;return true;
+    }
     bool read(GraphMonitorFrameV2& frame,uint64_t now){
         requested_.store(now);
         std::lock_guard lock(snapshot_mutex_);
-        const auto& v=published_.signal;
+        const auto& v=published_.audio.signal;
         if(!v.stamp||v.epoch!=epoch_.load()||now<v.stamp||now-v.stamp>fresh_ns)return false;
-        frame=published_;return true;
+        frame=published_.audio;return true;
     }
     bool read(GraphMonitorFrame& frame,uint64_t now){
         requested_.store(now);
         std::lock_guard lock(snapshot_mutex_);
-        const auto& v=published_.signal;
+        const auto& v=published_.audio.signal;
         if(!v.stamp||v.epoch!=epoch_.load()||now<v.stamp||now-v.stamp>fresh_ns)return false;
         frame=v;return true;
     }
@@ -60,9 +74,9 @@ public:
         if(!request||now<request||now-request>lease_ns||!input||!frames){
             used_=take_=0;return false;
         }
-        if(seen_epoch_!=epoch||staging_.signal.rate!=rate||staging_.stereo!=bool(right)){
-            used_=0;seen_epoch_=epoch;staging_.signal.rate=rate;staging_.stereo=bool(right);
-            if(!right){staging_.input_right.fill(0);staging_.output_right.fill(0);}
+        if(seen_epoch_!=epoch||staging_.audio.signal.rate!=rate||staging_.audio.stereo!=bool(right)){
+            used_=0;seen_epoch_=epoch;staging_.audio.signal.rate=rate;staging_.audio.stereo=bool(right);
+            if(!right){staging_.audio.input_right.fill(0);staging_.audio.output_right.fill(0);}
         }
         take_=std::min(frames,monitor_samples);
         if(frames>monitor_samples)used_=0;
@@ -72,16 +86,17 @@ public:
         }
         return true;
     }
-    void end(const float* output,unsigned frames,uint64_t now,const std::array<GraphMonitorControl,8>& controls,unsigned count,const float* right=nullptr){
-        if(!output||!take_||take_>frames||staging_.stereo!=bool(right)){used_=take_=0;return;}
+    void end(const float* output,unsigned frames,uint64_t now,const std::array<GraphMonitorControl,8>& controls,unsigned count,const float* right=nullptr,const NodeTelemetryArray& nodes={},unsigned node_count=0){
+        if(!output||!take_||take_>frames||staging_.audio.stereo!=bool(right)){used_=take_=0;return;}
         unsigned start=frames-take_;
         for(unsigned i=0;i<take_;++i){
-            staging_.signal.input[used_]=pending_[i];staging_.signal.output[used_]=clean(output[start+i]);
-            if(right){staging_.input_right[used_]=pending_right_[i];staging_.output_right[used_]=clean(right[start+i]);}
+            staging_.audio.signal.input[used_]=pending_[i];staging_.audio.signal.output[used_]=clean(output[start+i]);
+            if(right){staging_.audio.input_right[used_]=pending_right_[i];staging_.audio.output_right[used_]=clean(right[start+i]);}
             ++used_;
             if(used_==monitor_samples){
-                staging_.signal.stamp=now;staging_.signal.epoch=seen_epoch_;staging_.signal.sequence=++sequence_;
-                staging_.signal.controls=controls;staging_.signal.control_count=std::min(count,8u);
+                staging_.audio.signal.stamp=now;staging_.audio.signal.epoch=seen_epoch_;staging_.audio.signal.sequence=++sequence_;
+                staging_.audio.signal.controls=controls;staging_.audio.signal.control_count=std::min(count,8u);
+                staging_.nodes=nodes;staging_.node_count=std::min(node_count,16u);
                 std::unique_lock lock(snapshot_mutex_,std::try_to_lock);
                 if(lock.owns_lock())published_=staging_;
                 used_=0;

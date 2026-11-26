@@ -33,6 +33,10 @@ class Multiband {
 public:
     void reset(unsigned rate,MultibandSettings s){rate_=std::clamp(rate,8000u,192000u);configure(s,true);}
     void set(MultibandSettings s){configure(s,false);}
+    float detector_peak(unsigned band)const{return dynamics_[band].detector_peak();}
+    float gain_reduction_db(unsigned band)const{return dynamics_[band].gain_reduction_db();}
+    float low_frequency()const{return low_;}
+    float high_frequency()const{return high_;}
     void process(float*const* p,unsigned channels,unsigned frames){
         if(enabled_)bank_.process(p,channels,frames,dynamics_);
     }

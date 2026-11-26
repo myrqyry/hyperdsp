@@ -238,57 +238,146 @@ protected:
         }
     }
 };
+class NodeAnalysisPlot final:public QWidget {
+    NodeTelemetry node_{};
+    unsigned rate_=0;
+public:
+    explicit NodeAnalysisPlot(QWidget* parent):QWidget(parent){setMinimumHeight(170);}
+    void setNode(NodeTelemetry node,unsigned rate){node_=node;rate_=rate;update();}
+    void clear(){setNode({},0);}
+protected:
+    void paintEvent(QPaintEvent*)override{
+        QPainter p(this);p.setRenderHint(QPainter::Antialiasing);GraphColors c(palette());
+        p.fillRect(rect(),c.base);p.setPen(c.text);
+        if(node_.kind==TelemetryKind::None){p.drawText(rect(),Qt::AlignCenter,"No supported node telemetry");return;}
+        QColor grid=blend(c.base,c.text,.18);
+        if(node_.kind==TelemetryKind::DynamicEq){
+            QRectF area(42,24,width()-51,height()-65);
+            if(area.width()<24||area.height()<24)return;
+            p.drawText(QRectF(4,1,width()-8,20),Qt::AlignLeft,"Frozen wet EQ response · dB");
+            const double high=std::min(20000.,rate_*.49);
+            auto x=[&](double f){return area.left()+area.width()*std::log(f/20)/std::log(high/20);};
+            auto y=[&](double db){return area.top()+area.height()*(12-std::clamp(db,-24.,12.))/36;};
+            for(int db:{12,0,-12,-24}){
+                p.setPen(QPen(grid,db==0?1.5:1));p.drawLine(QPointF(area.left(),y(db)),QPointF(area.right(),y(db)));
+                p.setPen(c.text);p.drawText(QRectF(0,y(db)-8,37,16),Qt::AlignRight|Qt::AlignVCenter,QString::number(db));
+            }
+            for(double hz:{100.,1000.,10000.})if(hz<high){
+                p.setPen(grid);p.drawLine(QPointF(x(hz),area.top()),QPointF(x(hz),area.bottom()));
+                p.setPen(c.text);p.drawText(QRectF(x(hz)-18,area.bottom()+1,36,16),Qt::AlignCenter,hz>=1000?QString::number(hz/1000)+"k":QString::number(hz));
+            }
+            QPainterPath path;
+            for(int i=0;i<=200;++i){
+                double hz=20*std::pow(high/20,i/200.);
+                QPointF pt(x(hz),y(dynamic_eq_frozen_db(node_,rate_,hz)));
+                if(i==0)path.moveTo(pt);else path.lineTo(pt);
+            }
+            p.setPen(QPen(c.accent,2));p.drawPath(path);
+            if(node_.frequency>=20&&node_.frequency<=high)p.drawEllipse(QPointF(x(node_.frequency),y(node_.gain_db[0])),3,3);
+            p.setPen(c.text);p.drawText(QRectF(4,height()-23,width()-8,20),Qt::AlignCenter,
+                QString("%1 Hz · Q %2").arg(node_.frequency,0,'f',0).arg(node_.q,0,'f',2));
+            return;
+        }
+        unsigned count=node_.kind==TelemetryKind::Multiband?3:1;
+        const double w=width()-16.,rowHeight=(height()-8.)/count;
+        if(w<60||rowHeight<35)return;
+        for(unsigned b=0;b<count;++b){
+            double top=4+b*rowHeight;
+            double peak=20*std::log10(std::max(node_.peak[b],1e-6f)),gain=node_.gain_db[b];
+            QString name=count==1?"Broadband":QStringList{"Low","Mid","High"}[b];
+            p.setPen(c.text);p.drawText(QRectF(8,top,w,18),Qt::AlignLeft,name);
+            p.drawText(QRectF(8,top,w,18),Qt::AlignRight,QString("%1 dBFS  |  %2 dB").arg(peak,0,'f',1).arg(gain,0,'f',1));
+            double h=std::min(10.,(rowHeight-20)/2);
+            QRectF track(8,top+20,w,h);
+            p.setPen(Qt::NoPen);p.setBrush(grid);p.drawRoundedRect(track,3,3);
+            p.setBrush(c.edge);auto level=track;level.setWidth(w*std::clamp((peak+60)/60,0.,1.));p.drawRoundedRect(level,3,3);
+            track.translate(0,h+2);p.setBrush(grid);p.drawRoundedRect(track,3,3);
+            p.setBrush(c.accent);auto reduction=track;reduction.setWidth(w*std::clamp(-gain/30,0.,1.));reduction.moveRight(track.right());p.drawRoundedRect(reduction,3,3);
+        }
+    }
+};
 class MonitorPanel final:public QWidget {
     MonitorPlot* plot_;
     LiveAnalysisPlot* analysis_;
     QStackedWidget* stack_;
     QComboBox* view_;
+    QComboBox* node_;
+    NodeAnalysisPlot* nodePlot_;
     QLabel* detail_;
-    GraphMonitorFrameV2 frame_{};
+    GraphMonitorFrameV3 frame_{};
     bool valid_=false;
     QLabel *status_,*controls_;
     QTimer timer_;
-    std::function<bool(GraphMonitorFrameV2&)> read_;
+    std::function<bool(GraphMonitorFrameV3&)> read_;
 public:
-    MonitorPanel(std::function<bool(GraphMonitorFrameV2&)> read,QWidget* parent=nullptr):QWidget(parent),read_(std::move(read)){
+    MonitorPanel(std::function<bool(GraphMonitorFrameV3&)> read,QWidget* parent=nullptr):QWidget(parent),read_(std::move(read)){
         setObjectName("graphMonitor");setProperty("hasFrame",false);
         auto* layout=new QVBoxLayout(this);layout->setContentsMargins(3,3,3,3);layout->setSpacing(3);
         status_=new QLabel("Waiting for applied graph audio");status_->setObjectName("monitorStatus");status_->setTextFormat(Qt::PlainText);status_->setWordWrap(true);
         layout->addWidget(status_);
-        view_=new QComboBox;view_->setObjectName("monitorView");view_->addItems({"Waveform / spectrum","Stereo vectorscope","Spectrum difference"});layout->addWidget(view_);
+        view_=new QComboBox;view_->setObjectName("monitorView");view_->addItems({"Waveform / spectrum","Stereo vectorscope","Spectrum difference","Node activity"});layout->addWidget(view_);
+        node_=new QComboBox;node_->setObjectName("monitorNode");node_->hide();layout->addWidget(node_);
         stack_=new QStackedWidget;plot_=new MonitorPlot(this);analysis_=new LiveAnalysisPlot(this);
-        stack_->addWidget(plot_);stack_->addWidget(analysis_);layout->addWidget(stack_,1);
+        stack_->addWidget(plot_);stack_->addWidget(analysis_);nodePlot_=new NodeAnalysisPlot(this);stack_->addWidget(nodePlot_);layout->addWidget(stack_,1);
         detail_=new QLabel;detail_->setObjectName("monitorDetail");detail_->setWordWrap(true);detail_->setTextFormat(Qt::PlainText);layout->addWidget(detail_);
         auto* legend=new QLabel("Input — dashed   Output — solid · applied graph, not draft");legend->setWordWrap(true);layout->addWidget(legend);
         connect(view_,&QComboBox::currentIndexChanged,this,[this,legend](int i){
-            stack_->setCurrentIndex(i==0?0:1);analysis_->setView(i);updateDetail();
+            stack_->setCurrentIndex(i==0?0:i==3?2:1);node_->setVisible(i==3);analysis_->setView(i);updateDetail();
             legend->setText(i==0?"Input — dashed   Output — solid · applied graph, not draft":
                 i==1?"Input — larger dots   Output — smaller dots · applied graph":
-                "Positive = greater output magnitude · negative = less · applied graph");
+                i==2?"Positive = greater output magnitude · negative = less · applied graph":
+                "Detector (upper bar) / gain reduction (lower bar) · before makeup and mix");
         });
+        connect(node_,&QComboBox::currentIndexChanged,this,[this]{updateDetail();});
         controls_=new QLabel;controls_->setTextFormat(Qt::PlainText);controls_->setWordWrap(true);layout->addWidget(controls_);
         timer_.setInterval(50);connect(&timer_,&QTimer::timeout,this,[this]{poll();});
     }
+    void refreshNodes(){
+        QSignalBlocker block(node_);
+        int selected=node_->currentData().toInt();QStringList labels;QList<int> ids;
+        for(unsigned i=0;i<frame_.node_count;++i){
+            const auto& n=frame_.nodes[i];QString name;
+            if(n.kind==TelemetryKind::DynamicEq)name="Dynamic EQ";
+            else if(n.kind==TelemetryKind::Multiband)name="Multiband compressor";
+            else if(n.kind==TelemetryKind::Dynamics)name=QStringList{"Dynamics","Compressor","Expander","Gate","Limiter"}.value(n.mode,"Dynamics");
+            else continue;
+            labels<<QString("%1 · %2").arg(i+1).arg(name);ids<<int(i);
+        }
+        bool same=node_->count()==labels.size();
+        for(int i=0;same&&i<labels.size();++i)same=node_->itemText(i)==labels[i]&&node_->itemData(i).toInt()==ids[i];
+        if(same)return;
+        node_->clear();for(int i=0;i<labels.size();++i)node_->addItem(labels[i],ids[i]);
+        auto index=node_->findData(selected);node_->setCurrentIndex(index>=0?index:0);
+    }
     void updateDetail(){
         if(!valid_||view_->currentIndex()==0){detail_->clear();return;}
+        if(view_->currentIndex()==3){
+            if(node_->currentIndex()<0){nodePlot_->clear();detail_->setText("No supported dynamics nodes in applied graph.");return;}
+            const auto& n=frame_.nodes[node_->currentData().toUInt()];
+            nodePlot_->setNode(n,frame_.audio.signal.rate);
+            if(n.kind==TelemetryKind::DynamicEq)detail_->setText(QString("Dynamic gain %1 dB · detector %2 dBFS · frozen wet response, excludes mix/trim").arg(n.gain_db[0],0,'f',1).arg(20*std::log10(std::max(n.peak[0],1e-6f)),0,'f',1));
+            else if(n.kind==TelemetryKind::Multiband)detail_->setText(QString("Crossovers %1 / %2 Hz · detector peaks and gain reduction").arg(n.low_hz,0,'f',0).arg(n.high_hz,0,'f',0));
+            else detail_->setText(QString("Smoothed gain %1 dB · detector peak and gain reduction").arg(n.gain_db[0],0,'f',1));
+            return;
+        }
         if(view_->currentIndex()==2){detail_->setText("Observed channel 1 output minus input spectrum; masked quiet bins, not a transfer function.");return;}
-        if(!frame_.stereo){detail_->setText("Stereo analysis requires two channels.");return;}
-        auto metrics=window_stereo(frame_.signal.output,frame_.output_right);
+        if(!frame_.audio.stereo){detail_->setText("Stereo analysis requires two channels.");return;}
+        auto metrics=window_stereo(frame_.audio.signal.output,frame_.audio.output_right);
         if(!metrics.valid){detail_->setText("Output silent · input and output vectors shown");return;}
         detail_->setText(QString("Output · correlation %1 · mono fold %2 dB · side %3%")
             .arg(metrics.correlation_valid?QString::number(metrics.correlation,'f',3):QString("undefined"))
             .arg(metrics.mono_loss_db,0,'f',1).arg(metrics.side_fraction*100,0,'f',1));
     }
     void reset(){
-        plot_->clear();analysis_->clear();valid_=false;detail_->clear();setProperty("hasFrame",false);status_->setText("Waiting for applied graph audio");controls_->clear();
+        plot_->clear();analysis_->clear();nodePlot_->clear();valid_=false;{QSignalBlocker block(node_);node_->clear();}detail_->clear();setProperty("hasFrame",false);status_->setText("Waiting for applied graph audio");controls_->clear();
     }
     void poll(){
-        GraphMonitorFrameV2 next{};
+        GraphMonitorFrameV3 next{};
         if(!read_(next)){reset();return;}
-        const auto& frame=next.signal;
-        if(frame.rate<8000||frame.rate>192000||frame.control_count>8){reset();return;}
+        const auto& frame=next.audio.signal;
+        if(frame.rate<8000||frame.rate>192000||frame.control_count>8||next.node_count>16){reset();return;}
         if(plot_->valid&&plot_->frame.sequence==frame.sequence&&plot_->frame.epoch==frame.epoch)return;
-        frame_=next;valid_=true;plot_->setFrame(frame);analysis_->setFrame(next,plot_->input,plot_->output);updateDetail();setProperty("hasFrame",true);
+        frame_=next;valid_=true;plot_->setFrame(frame);analysis_->setFrame(next.audio,plot_->input,plot_->output);refreshNodes();updateDetail();setProperty("hasFrame",true);
         auto peak=[](const auto& samples){float max=0;for(float v:samples)max=std::max(max,std::abs(v));return 20*std::log10(std::max(max,1e-6f));};
         status_->setText(QString("Live · %1 kHz · Ch 1 peak: in %2 / out %3 dBFS").arg(frame.rate/1000.,0,'g',4).arg(peak(frame.input),0,'f',1).arg(peak(frame.output),0,'f',1));
         QStringList values;
@@ -643,10 +732,10 @@ EffectBuilder::EffectBuilder(QWidget* parent,QString storagePath,QString bundled
     connect(addBinding_,&QPushButton::clicked,this,[this]{addBinding();});
     connect(removeBinding_,&QPushButton::clicked,this,[this]{removeBinding();});
     tabs->addTab(makeRoutePanel(),"Modulation");
-    auto* monitor=new MonitorPanel([this](GraphMonitorFrameV2& frame){
+    auto* monitor=new MonitorPanel([this](GraphMonitorFrameV3& frame){
         auto* source=find_target(target_);if(!source)return false;
         calldata_t d;calldata_init(&d);calldata_set_ptr(&d,"frame",&frame);
-        bool ready=proc_handler_call(obs_source_get_proc_handler(source),"hyperdsp_graph_monitor_v2",&d)&&calldata_bool(&d,"available");
+        bool ready=proc_handler_call(obs_source_get_proc_handler(source),"hyperdsp_graph_monitor_v3",&d)&&calldata_bool(&d,"available");
         calldata_free(&d);obs_source_release(source);return ready;
     });
     tabs->addTab(monitor,"Monitor");

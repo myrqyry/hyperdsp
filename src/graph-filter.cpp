@@ -196,7 +196,16 @@ void monitor_read_v2(void* ptr,calldata_t* data){
     if(!obs_source_enabled(f->source)){f->monitor.invalidate();return;}
     calldata_set_bool(data,"available",f->monitor.read(frame,os_gettime_ns()));
 }
-void* create(obs_data_t* s,obs_source_t* source){auto p=std::make_unique<Source>();p->source=source;proc_handler_add(obs_source_get_proc_handler(source),"void hyperdsp_graph_apply_v1(in string graph, in bool validate_only, out bool ok, out string status)",builder_apply,p.get());proc_handler_add(obs_source_get_proc_handler(source),"void hyperdsp_graph_monitor_v1(in ptr frame, out bool available)",monitor_read,p.get());proc_handler_add(obs_source_get_proc_handler(source),"void hyperdsp_graph_monitor_v2(in ptr frame, out bool available)",monitor_read_v2,p.get());update(p.get(),s);return p.release();}
+void monitor_read_v3(void* ptr,calldata_t* data){
+    auto* f=static_cast<Source*>(ptr);calldata_set_bool(data,"available",false);
+    void* raw=nullptr;
+    if(!f||!calldata_get_ptr(data,"frame",&raw)||!raw)return;
+    auto& frame=*static_cast<GraphMonitorFrameV3*>(raw);
+    if(frame.version!=3||frame.size!=sizeof(GraphMonitorFrameV3))return;
+    if(!obs_source_enabled(f->source)){f->monitor.invalidate();return;}
+    calldata_set_bool(data,"available",f->monitor.read(frame,os_gettime_ns()));
+}
+void* create(obs_data_t* s,obs_source_t* source){auto p=std::make_unique<Source>();p->source=source;proc_handler_add(obs_source_get_proc_handler(source),"void hyperdsp_graph_apply_v1(in string graph, in bool validate_only, out bool ok, out string status)",builder_apply,p.get());proc_handler_add(obs_source_get_proc_handler(source),"void hyperdsp_graph_monitor_v1(in ptr frame, out bool available)",monitor_read,p.get());proc_handler_add(obs_source_get_proc_handler(source),"void hyperdsp_graph_monitor_v2(in ptr frame, out bool available)",monitor_read_v2,p.get());proc_handler_add(obs_source_get_proc_handler(source),"void hyperdsp_graph_monitor_v3(in ptr frame, out bool available)",monitor_read_v3,p.get());update(p.get(),s);return p.release();}
 void destroy(void* p){delete static_cast<Source*>(p);}
 const char* name(void*){return "HyperDSP Graph";}
 bool restore_working_graph(obs_properties_t*,obs_property_t*,void* ptr){
@@ -255,7 +264,8 @@ obs_audio_data* process(void* ptr,obs_audio_data* audio){
             std::copy_n(name.data(),std::min<size_t>(name.size(),80),controls[i].name.data());
             controls[i].base=f->active->base_value(i);controls[i].effective=f->active->effective_value(i);
         }
-        f->monitor.end(p[0],audio->frames,os_gettime_ns(),controls,count,right);
+        NodeTelemetryArray nodes{};auto node_count=f->active->telemetry(nodes);
+        f->monitor.end(p[0],audio->frames,os_gettime_ns(),controls,count,right,nodes,node_count);
     }
     return audio;
 }

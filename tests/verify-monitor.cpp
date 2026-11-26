@@ -73,7 +73,23 @@ int main(int argc,char** argv){
     obs_data_set_string(settings,"graph_json",R"({"schema":1,"nodes":[],"output":-1})");obs_source_update(filter,settings);
     ok=ok&&!read();stream(5);ok=ok&&read()&&frame.control_count==0;
     for(unsigned i=0;i<frame.input.size();++i)ok=ok&&frame.input[i]==frame.output[i];
-    os_sleep_ms(650);ok=ok&&!read()&&!readStereo();
+    GraphMonitorFrameV3 telemetry{};
+    auto readNodes=[&](){
+        calldata_t d;calldata_init(&d);calldata_set_ptr(&d,"frame",&telemetry);
+        bool ready=proc_handler_call(obs_source_get_proc_handler(filter),"hyperdsp_graph_monitor_v3",&d)&&calldata_bool(&d,"available");calldata_free(&d);return ready;
+    };
+    obs_data_set_string(settings,"graph_json",R"({"schema":1,"nodes":[{"effect":"native:hyperdsp_dynamic_eq_filter:1","params":{"frequency":1500,"threshold":-30,"range_db":-9},"inputs":[{"source":-1,"weight":1}]},{"effect":"native:hyperdsp_dynamics_filter:1","params":{"threshold":-30,"ratio":4},"inputs":[{"source":-1,"weight":1}]},{"effect":"native:hyperdsp_multiband_filter:1","params":{"mid_threshold":-30,"mid_ratio":4,"low_ratio":1,"high_ratio":1},"inputs":[{"source":-1,"weight":1}]},{"effect":"gain","inputs":[{"source":0,"weight":0.3},{"source":1,"weight":0.3},{"source":2,"weight":0.3}]}],"output":3})");
+    obs_source_update(filter,settings);ok=ok&&!readNodes();stream(100);ok=ok&&readNodes();
+    const auto& n=telemetry.nodes;
+    ok=ok&&telemetry.node_count==4&&n[0].kind==TelemetryKind::DynamicEq&&n[1].kind==TelemetryKind::Dynamics&&n[2].kind==TelemetryKind::Multiband&&n[3].kind==TelemetryKind::None;
+    ok=ok&&std::abs(n[0].frequency-1500)<.1&&std::abs(n[0].gain_db[0]+9)<.02&&std::abs(n[1].gain_db[0]+16.5)<.2&&n[2].gain_db[1]<-10&&n[2].gain_db[0]==0&&n[2].gain_db[2]==0;
+    ok=ok&&n[2].peak[1]>n[2].peak[0]&&n[2].peak[1]>n[2].peak[2];
+    ok=ok&&std::abs(dynamic_eq_frozen_db(n[0],48000,1500)+9)<.02&&std::abs(dynamic_eq_frozen_db(n[0],48000,20))<.01;
+    std::printf("NODE_TELEMETRY eq=%g compressor=%g mid=%g peaks=%g/%g/%g\n",n[0].gain_db[0],n[1].gain_db[0],n[2].gain_db[1],n[2].peak[0],n[2].peak[1],n[2].peak[2]);
+    telemetry.size=0;ok=ok&&!readNodes();telemetry.size=sizeof(telemetry);
+    obs_data_set_string(settings,"graph_json",R"({"schema":1,"nodes":[],"output":-1})");obs_source_update(filter,settings);
+    ok=ok&&!readNodes();stream(5);ok=ok&&readNodes()&&telemetry.node_count==0;
+    os_sleep_ms(650);ok=ok&&!read()&&!readStereo()&&!readNodes();
     // Deterministic lease and window coverage, independent of wall-clock sleeps.
     GraphMonitor core;GraphMonitorFrame snap{};
     std::array<GraphMonitorControl,8> controls{};

@@ -37,6 +37,9 @@ class DynamicEq {
 public:
     void reset(unsigned rate,DynamicEqSettings s){rate_=std::clamp(rate,8000u,192000u);ramp_=std::max(1u,rate_/100);configure(s,true);}
     void set(DynamicEqSettings s){configure(s,false);}
+    float detector_peak()const{return peak_;}
+    float current_frequency()const{return cached_hz_;}
+    float current_q()const{return cached_q_;}
     float dynamic_gain_db()const{return gain_db_;}
     void process(float*const* p,unsigned channels,unsigned frames){
         if(!enabled_||!p||!channels||channels>8)return;

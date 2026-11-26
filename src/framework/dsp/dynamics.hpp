@@ -70,6 +70,8 @@ public:
     void reset(unsigned rate,DynamicsSettings s){rate_=std::clamp(rate,8000u,192000u);ramp_=std::max(1u,rate_/100);configure(s,true);}
     void set(DynamicsSettings s){configure(s,false);}
     void external_values(const std::array<float,modulation_slots>& v){matrix_.external_values(v);}
+    float detector_peak()const{return peak_;}
+    DynamicsMode mode()const{return settings_.mode;}
     float gain_reduction_db()const{return std::max(0.f,-gain_db_);}
     void process(float* const* p,unsigned channels,unsigned frames){
         if(!p||channels>8)return;

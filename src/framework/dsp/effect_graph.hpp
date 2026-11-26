@@ -1,5 +1,6 @@
 #pragma once
 #include "parameter_schema.hpp"
+#include "node_telemetry.hpp"
 #include "fractional_delay.hpp"
 #include "engines/mic_dsp_engine.hpp"
 #include "ladspa_engine.hpp"
@@ -352,6 +353,26 @@ public:
             target[it-controls_.begin()]=value;
         }
         return true;
+    }
+    unsigned telemetry(NodeTelemetryArray& result)const{
+        result={};
+        for(unsigned i=0;i<nodes_.size();++i){
+            auto& n=result[i];
+            std::visit([&](const auto& engine){
+                using T=std::decay_t<decltype(engine)>;
+                if constexpr(std::is_same_v<T,std::unique_ptr<Dynamics>>){
+                    n.kind=TelemetryKind::Dynamics;n.mode=unsigned(engine->mode());
+                    n.peak[0]=engine->detector_peak();n.gain_db[0]=-engine->gain_reduction_db();
+                }else if constexpr(std::is_same_v<T,std::unique_ptr<DynamicEq>>){
+                    n.kind=TelemetryKind::DynamicEq;n.peak[0]=engine->detector_peak();
+                    n.gain_db[0]=engine->dynamic_gain_db();n.frequency=engine->current_frequency();n.q=engine->current_q();
+                }else if constexpr(std::is_same_v<T,std::unique_ptr<Multiband>>){
+                    n.kind=TelemetryKind::Multiband;n.low_hz=engine->low_frequency();n.high_hz=engine->high_frequency();
+                    for(unsigned b=0;b<3;++b){n.peak[b]=engine->detector_peak(b);n.gain_db[b]=-engine->gain_reduction_db(b);}
+                }
+            },nodes_[i].engine);
+        }
+        return unsigned(nodes_.size());
     }
     const std::vector<GraphControl>& controls()const{return controls_;}
     double base_value(unsigned i)const{return i<controls_.size()?values_[i]:0;}

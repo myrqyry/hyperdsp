@@ -356,6 +356,30 @@ int main(int argc,char** argv){
                 builder.resize(oldSize);
                 QTest::qWait(600);
                 monitored=monitored&&!meter->property("hasFrame").toBool()&&monitorStatus->text().contains("Waiting")&&detail&&detail->text().isEmpty();
+                builder.setDraft(QJsonDocument::fromJson(R"({"schema":1,"nodes":[{"effect":"native:hyperdsp_dynamic_eq_filter:1","params":{"frequency":1500,"threshold":-30,"range_db":-9},"inputs":[{"source":-1,"weight":1}]},{"effect":"native:hyperdsp_dynamics_filter:1","params":{"threshold":-30,"ratio":4},"inputs":[{"source":-1,"weight":1}]},{"effect":"native:hyperdsp_multiband_filter:1","params":{"mid_threshold":-30,"mid_ratio":4,"low_ratio":1,"high_ratio":1},"inputs":[{"source":-1,"weight":1}]},{"effect":"gain","inputs":[{"source":0,"weight":0.3},{"source":1,"weight":0.3},{"source":2,"weight":0.3}]}],"output":3})").object());
+                QTest::mouseClick(apply,Qt::LeftButton);QTest::qWait(80);
+                if(view)view->setCurrentIndex(3);
+                for(unsigned k=0;k<100;++k){
+                    for(unsigned j=0;j<480;++j){l[j]=.4f*std::sin(2*std::numbers::pi*(k*480+j)*1500/48000);r[j]=-l[j];}
+                    obs_source_audio a{};a.data[0]=(uint8_t*)l.data();a.data[1]=(uint8_t*)r.data();
+                    a.frames=480;a.speakers=SPEAKERS_STEREO;a.format=AUDIO_FORMAT_FLOAT_PLANAR;a.samples_per_sec=48000;
+                    a.timestamp=start+(100+k)*10000000ULL;obs_source_output_audio(source,&a);
+                }
+                QTest::qWait(80);
+                auto* node=builder.findChild<QComboBox*>("monitorNode");
+                monitored=monitored&&node&&node->count()==3&&node->currentText().contains("Dynamic EQ")&&detail&&detail->text().contains("-9.0 dB");
+                if(qEnvironmentVariableIsSet("HYPERDSP_BUILDER_SCREENSHOT"))builder.grab().save(qEnvironmentVariable("HYPERDSP_BUILDER_SCREENSHOT")+".node.png");
+                if(node&&node->count()==3){
+                    node->setCurrentIndex(1);QTest::qWait(20);
+                    monitored=monitored&&detail->text().contains("-16.5 dB");
+                    node->setCurrentIndex(2);QTest::qWait(20);
+                    monitored=monitored&&detail->text().contains("250 / 2500 Hz");
+                    auto normal=builder.size();builder.resize(420,640);QTest::qWait(30);
+                    if(qEnvironmentVariableIsSet("HYPERDSP_BUILDER_SCREENSHOT"))builder.grab().save(qEnvironmentVariable("HYPERDSP_BUILDER_SCREENSHOT")+".bands-narrow.png");
+                    builder.resize(normal);
+                }
+                QTest::qWait(600);
+                monitored=monitored&&node&&node->count()==0&&detail&&detail->text().isEmpty();
                 tabs->setCurrentIndex(3);
             }
             std::printf("BUILDER_MONITOR_PASS=%d\n",monitored);ok=ok&&monitored;
