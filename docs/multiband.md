@@ -9,3 +9,5 @@ Verification: core neutral recombination across five sample rates (8, 44.1, 48, 
 The crossover and phase-matched chunk processor now reside in the shared three_band.hpp bank, also consumed by three-band transient shaping. The compressor settings and signal path are unchanged.
 
 Graph Monitor Node activity now displays independent held detector peaks and smoothed gain reduction for all three compressor bands; these are not output RMS meters. Standalone properties now offer Open live analysis with the same detector and reduction meters.
+
+The standalone Open live analysis window also provides draggable crossover boundaries (preview while dragging, apply on release) and per-band threshold, ratio and makeup controls. See [standalone analysis](filter-analysis.md).

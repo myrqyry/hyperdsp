@@ -8,6 +8,7 @@
 #include <QPointer>
 #include <QDoubleSpinBox>
 #include <QLineEdit>
+#include <QComboBox>
 #include <QWheelEvent>
 #include <array>
 #include <numbers>
@@ -100,6 +101,58 @@ int main(int argc,char** argv){
                     live=obs_source_get_settings(f);std::printf("EQ_STALE_EDIT range=%g\n",obs_data_get_double(live,"range_db"));ok=ok&&obs_data_get_double(live,"range_db")==-6;obs_data_release(live);
                     freq->setValue(1500);depth->setValue(-9);QTest::qWait(80);
                     std::printf("EQ_EDITOR drag_live=%d frequency=%g range=%g q=%g pass=%d\n",moving,freq->value(),depth->value(),q->value(),ok);
+                }
+            }
+            if(n.kind==TelemetryKind::Multiband){
+                auto* crossover=dialog->findChild<QWidget*>("bandCrossover");
+                auto* low=dialog->findChild<QDoubleSpinBox*>("bandLowHz");
+                auto* high=dialog->findChild<QDoubleSpinBox*>("bandHighHz");
+                auto* band=dialog->findChild<QComboBox*>("bandSelect");
+                auto* ratio=dialog->findChild<QDoubleSpinBox*>("bandRatio");
+                auto* threshold=dialog->findChild<QDoubleSpinBox*>("bandThreshold");
+                auto* makeup=dialog->findChild<QDoubleSpinBox*>("bandMakeup");
+                ok=ok&&crossover&&low&&high&&band&&ratio&&threshold&&makeup;
+                if(crossover&&low&&high&&band&&ratio&&threshold&&makeup){
+                    auto* editor=crossover->parentWidget();
+                    int bottom=crossover->geometry().bottom(),spinTop=low->mapTo(editor,QPoint(0,0)).y();
+                    std::printf("BAND_LAYOUT window=%dx%d editor=%dx%d crossover_bottom=%d spin_top=%d\n",dialog->width(),dialog->height(),editor->width(),editor->height(),bottom,spinTop);
+                    auto* footer=dialog->findChild<QLabel*>("filterAnalysisDetail");
+                    ok=ok&&spinTop-bottom>=20&&footer&&footer->geometry().top()>editor->geometry().bottom();
+                    auto point=[&](double hz){return QPointF(12+(crossover->width()-24)*std::log(hz/20)/std::log(1000.),32).toPoint();};
+                    auto from=point(250),to=point(400);
+                    QTest::mousePress(crossover,Qt::LeftButton,Qt::NoModifier,from);
+                    QTest::mouseMove(crossover,to,40);QTest::qWait(90);
+                    auto* live=obs_source_get_settings(f);bool deferred=obs_data_get_double(live,"low_hz")==250;obs_data_release(live);
+                    QTest::mouseRelease(crossover,Qt::LeftButton,Qt::NoModifier,to);QTest::qWait(80);
+                    live=obs_source_get_settings(f);double moved=obs_data_get_double(live,"low_hz");obs_data_release(live);
+                    ok=ok&&deferred&&std::abs(moved-400)<15;
+                    low->setValue(250);high->setValue(3500);QTest::qWait(80);
+                    band->setCurrentIndex(1);ratio->setValue(1);QTest::qWait(80);
+                    stream();QTest::qWait(80);bool neutral=read()&&std::abs(frame.node.gain_db[1])<.01&&std::abs(frame.node.high_hz-3500)<.1;
+                    band->setCurrentIndex(0);threshold->setValue(-42);makeup->setValue(3);QTest::qWait(80);
+                    live=obs_source_get_settings(f);
+                    ok=ok&&neutral&&obs_data_get_double(live,"low_threshold")==-42&&obs_data_get_double(live,"low_makeup")==3&&obs_data_get_double(live,"mid_threshold")==-30&&obs_data_get_double(live,"high_ratio")==1;
+                    obs_data_set_double(live,"high_hz",4000);obs_source_update(f,live);obs_data_release(live);
+                    QTest::qWait(80);ok=ok&&high->value()==4000;
+                    // Click a region while a numeric field is being edited.
+                    auto* entry=threshold->findChild<QLineEdit*>();
+                    if(entry){
+                        threshold->setFocus();entry->selectAll();QTest::keyClicks(entry,"-36");
+                        QTest::mouseClick(crossover,Qt::LeftButton,Qt::NoModifier,point(1000));
+                        QTest::qWait(80);
+                        live=obs_source_get_settings(f);
+                        ok=ok&&band->currentIndex()==1&&obs_data_get_double(live,"low_threshold")==-36&&obs_data_get_double(live,"mid_threshold")==-30;
+                        obs_data_release(live);
+                    }else ok=false;
+                    // A drag cancelled by hiding the window must not commit.
+                    QTest::mousePress(crossover,Qt::LeftButton,Qt::NoModifier,point(4000));
+                    QTest::mouseMove(crossover,point(6000),40);dialog->hide();QTest::qWait(80);dialog->show();QTest::qWait(80);
+                    live=obs_source_get_settings(f);ok=ok&&obs_data_get_double(live,"high_hz")==4000;obs_data_release(live);
+                    band->setCurrentIndex(0);
+                    // Restore the original compressor settings.
+                    high->setValue(2500);threshold->setValue(-18);makeup->setValue(0);band->setCurrentIndex(1);ratio->setValue(4);QTest::qWait(80);
+                    stream();QTest::qWait(80);bool restored=read();ok=ok&&restored&&frame.node.gain_db[1]<-10;
+                    std::printf("BAND_EDITOR deferred=%d moved=%g neutral=%d restored_gain=%g pass=%d\n",deferred,moved,neutral,frame.node.gain_db[1],ok);
                 }
             }
             dialog->hide();QTest::qWait(1050);

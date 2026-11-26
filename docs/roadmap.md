@@ -83,6 +83,8 @@ Standalone conventional audio effects and hosting for OBS, with optional inputs 
 
 - Standalone Dynamic EQ interactive gain-limit curve with draggable center/limit, wheel Q, numeric controls and coalesced native settings edits; live response distinct from configured limit.
 
+- Standalone multiband compressor crossover region editor, deferred topology changes, independent band threshold/ratio/makeup and native setting synchronization.
+
 ## Next layers
 
 - Unified discoverable effect library: favorites, native/installed external/community definitions, backend compatibility, descriptions, safe explicit acquisition and reusable presets. Reset/import/export and a compact native frequency-response view.
