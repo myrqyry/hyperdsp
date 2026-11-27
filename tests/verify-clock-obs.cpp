@@ -1,15 +1,20 @@
 #include <obs-module.h>
 #include <util/platform.h>
 #include <array>
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <string>
+#include <vector>
+#include <thread>
 
 struct Probe {
     uint64_t frames=0,packets=0,anchor=0;
     bool ok=true;
 };
 static Probe probe;
+static obs_source_t* replace_clock=nullptr;
+static bool lifetime_ok=false;
 static const char* name(void*){return "Clock test";}
 static void* create(obs_data_t*,obs_source_t*){return &probe;}
 static void destroy(void*){}
@@ -21,6 +26,21 @@ static obs_audio_data* inspect(void*,obs_audio_data* a){
     auto* l=reinterpret_cast<float*>(a->data[0]);auto* r=reinterpret_cast<float*>(a->data[1]);
     if(!l||!r)probe.ok=false;
     else for(unsigned j=0;j<a->frames;++j)probe.ok=probe.ok&&std::isfinite(l[j])&&std::abs(r[j]+.4f*l[j])<1e-5;
+    if(replace_clock&&l&&r){
+        std::vector<float> left(l,l+a->frames),right(r,r+a->frames);
+        auto* clock=replace_clock;replace_clock=nullptr;
+        // Simulate a settings writer while the downstream filter still owns
+        // the previous callback's returned audio pointers.
+        std::thread writer([clock]{
+            for(int quality:{2,1}){
+                auto* s=obs_source_get_settings(clock);
+                obs_data_set_int(s,"quality",quality);
+                obs_source_update(clock,s);obs_data_release(s);
+            }
+        });
+        writer.join();
+        lifetime_ok=std::equal(left.begin(),left.end(),l)&&std::equal(right.begin(),right.end(),r);
+    }
     probe.frames+=a->frames;++probe.packets;return a;
 }
 int main(int argc,char** argv){
@@ -73,6 +93,10 @@ int main(int argc,char** argv){
     calldata_init(&d);proc_handler_call(obs_source_get_proc_handler(clock),"hyperdsp_clock_sync_status_v1",&d);
     ok=ok&&calldata_bool(&d,"available")&&!calldata_bool(&d,"locked")&&std::abs(calldata_float(&d,"ratio")-1)<1e-9;
     calldata_free(&d);
+    probe={};replace_clock=clock;
+    stream(3,start+300000000000ULL,0);
+    ok=ok&&lifetime_ok;
+    std::printf("CLOCK_OUTPUT_LIFETIME=%d\n",lifetime_ok);
     obs_source_filter_remove(source,watcher);obs_source_filter_remove(source,clock);
     obs_source_release(watcher);obs_source_release(clock);obs_source_release(source);obs_shutdown();
     std::printf("CLOCK_OBS_PASS=%d\n",ok);return ok?0:1;
