@@ -24,7 +24,7 @@ On a headless Linux host with Xvfb available, run `xvfb-run -a tests/verify.sh` 
 ### Shared CI packages
 
 [Shared OBS plugin CI](.github/workflows/ci.yml) targets Linux x86-64
-with pinned OBS 32.2.0 and 33.0.3 SDKs. All 56 configured tests, including
+with pinned OBS 32.2.0 and 33.0.3 SDKs. All 58 configured tests, including
 Qt Effect Builder, Clock Sync, real libobs audio and LADSPA discovery,
 are required. The versioned packages contain the plugin, all 11 graph
 presets, licensing and the installed effect-library/scanner tools.
@@ -33,7 +33,7 @@ OBS32 uses `bin/64bit/hyperdsp.so`; OBS33 uses `hyperdsp.so` at the
 plugin root. For local CMake installs, choose
 `-DHYPERDSP_PACKAGE_LAYOUT=legacy` (default) or `modern` for the
 matching target SDK. Do not install two versions together.
-Windows/macOS portability work has begun, but native builds are not yet qualified. See [CI qualification](docs/ci.md).
+Windows/macOS portability work has begun, but native builds are not yet qualified on this branch. See [CI qualification](docs/ci.md). For opt-in Linux callback timing and allocator audit, see [real-time profiling](docs/realtime-profiling.md).
 
 ## Clock Sync
 
