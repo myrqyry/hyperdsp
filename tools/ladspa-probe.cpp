@@ -1,5 +1,5 @@
 #include <ladspa.h>
-#include <dlfcn.h>
+#include "../src/platform/native_library.hpp"
 #include <cstdio>
 #include <cmath>
 #include <string>
@@ -8,12 +8,11 @@ static std::string clean(const char* s) {
     for(char& c:out)if(c=='\t'||c=='\r'||c=='\n')c=' ';
     return out;
 }
-int main(int argc,char** argv) {
-    if(argc!=2)return 2;
-    void* lib=dlopen(argv[1],RTLD_NOW|RTLD_LOCAL);
+static int probe(const std::string& path) {
+    void* lib=hyperdsp::platform::open_library(path);
     if(!lib)return 3;
-    auto entry=reinterpret_cast<LADSPA_Descriptor_Function>(dlsym(lib,"ladspa_descriptor"));
-    if(!entry){dlclose(lib);return 4;}
+    auto entry=hyperdsp::platform::library_symbol<LADSPA_Descriptor_Function>(lib,"ladspa_descriptor");
+    if(!entry){hyperdsp::platform::close_library(lib);return 4;}
     for(unsigned i=0;i<1024;++i){
         auto* d=entry(i);if(!d)break;
         if(!d->Label||!d->Name||!LADSPA_IS_HARD_RT_CAPABLE(d->Properties)||
@@ -36,5 +35,15 @@ int main(int argc,char** argv) {
                 static_cast<unsigned long>(h.HintDescriptor),double(h.LowerBound),double(h.UpperBound));
         }
     }
-    dlclose(lib);
+    hyperdsp::platform::close_library(lib);
+    return 0;
 }
+#ifdef _WIN32
+int wmain(int argc,wchar_t** argv) {
+    return argc==2?probe(hyperdsp::platform::utf8_path(std::filesystem::path(argv[1]))):2;
+}
+#else
+int main(int argc,char** argv) {
+    return argc==2?probe(argv[1]):2;
+}
+#endif

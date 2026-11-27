@@ -2,7 +2,7 @@
 
 Shared obs-plugin-ci pin 359da119f3dd3d1e2d392cbf7e65f5766221cc68.
 Linux profile: OBS32.2.0 on Ubuntu24 and OBS33.0.3 on Ubuntu26.
-The first HyperDSP CI workflow requires all 54 named tests; the
+The first HyperDSP CI workflow originally required all 54 named tests; the current inventory is 56; the
 JUnit gate rejects missing, extra, skipped or failed tests. Qt Builder,
 Clock Sync and LADSPA SDK fixture support must remain enabled.
 The caller uses the shared SDK shell recipe, Rust pack and payload-manifest
@@ -22,3 +22,24 @@ proof of OBS33 ABI/runtime support. Native hosted SDK qualification
 remains pending. Windows/macOS need a real portability pass for POSIX
 dynamic loading, scanner process lifecycle and dependencies; no nominal
 matrix coverage by disabling features. Private repository stays private.
+
+## Host portability checkpoint
+
+The loader and discovery tools now share a native library boundary:
+POSIX dlopen and Windows LoadLibraryExW with UTF-8 path conversion,
+absolute library paths, and platform-specific discovery extensions.
+The scanner owns a process group on POSIX and a kill-on-close job on
+Windows. macOS bundle-relative Resources/tools discovery is supported
+in the scanner. Two named regressions cover native discovery and
+scanner start, result, cancellation and restart. Linux focused tests
+passed; the new Windows branch has not been compiled or executed and
+macOS has not been tested. Native dependency provisioning, an amplifier
+fixture for each target, CMake module/bundle layout, native audio
+audition, and native SDK qualification remain open. Linux CI remains
+the only enabled profile. HyperDSP run 45917243129 was budget-blocked
+before compilation. No change to repo visibility or billing.
+
+Both extracted 17-file Linux packages passed real LADSPA scanner and
+CLI checks. Full Linux regression subsequently passed all 56 named tests,
+with zero failures or skips. Both layouts used the OBS32.2.0 binary;
+this is not OBS33 ABI qualification.

@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import sysconfig
+import sys
 import math
 
 def category(name):
@@ -21,21 +22,51 @@ def category(name):
     }
     return next((group for group, terms in groups.items() if any(t in name.lower() for t in terms)), "Other")
 
+def default_catalog():
+    home = Path.home()
+    if sys.platform == "win32":
+        config = Path(os.environ.get("APPDATA", home / "AppData/Roaming")) / "obs-studio"
+    elif sys.platform == "darwin":
+        config = home / "Library/Application Support/obs-studio"
+    else:
+        config = Path(os.environ.get("XDG_CONFIG_HOME", home / ".config")) / "obs-studio"
+    return config / "plugin_config/hyperdsp/ladspa-catalog.json"
+
+def default_roots():
+    home = Path.home()
+    if sys.platform == "win32":
+        return [Path(os.environ.get("LOCALAPPDATA", home / "AppData/Local")) / "LADSPA",
+                Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "LADSPA"]
+    if sys.platform == "darwin":
+        return [home / "Library/Audio/Plug-Ins/LADSPA", Path("/Library/Audio/Plug-Ins/LADSPA"),
+                Path("/opt/homebrew/lib/ladspa"), Path("/usr/local/lib/ladspa")]
+    roots = [home / ".ladspa", home / ".local/lib/ladspa",
+             Path("/usr/lib/ladspa"), Path("/usr/local/lib/ladspa"), Path("/usr/lib64/ladspa")]
+    if multiarch := sysconfig.get_config_var("MULTIARCH"):
+        roots += [Path("/usr/lib") / multiarch / "ladspa", Path("/usr/local/lib") / multiarch / "ladspa"]
+    return roots
+
+def library_candidates(roots):
+    suffixes = {".dll"} if sys.platform == "win32" else {".so", ".dylib"} if sys.platform == "darwin" else {".so"}
+    paths = set()
+    for root in roots:
+        if root.is_file():
+            paths.add(root.resolve())
+        elif root.is_dir():
+            paths.update(p.resolve() for p in root.iterdir() if p.suffix.lower() in suffixes and p.is_file())
+    return sorted(paths)
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--probe", type=Path, default=Path(__file__).with_name("hyperdsp-ladspa-probe"))
-    parser.add_argument("--output", type=Path, default=Path(os.environ.get("XDG_CONFIG_HOME", Path.home()/".config"))/"obs-studio"/"plugin_config"/"hyperdsp"/"ladspa-catalog.json")
+    parser.add_argument("--probe", type=Path, default=Path(__file__).with_name("hyperdsp-ladspa-probe.exe" if sys.platform == "win32" else "hyperdsp-ladspa-probe"))
+    parser.add_argument("--output", type=Path, default=default_catalog())
     parser.add_argument("paths", nargs="*", type=Path)
     args = parser.parse_args()
     if not args.probe.is_file():
         parser.error("build hyperdsp-ladspa-probe and pass --probe")
     configured = os.environ.get("LADSPA_PATH")
-    defaults = [Path.home()/".ladspa", Path.home()/".local/lib/ladspa",
-                Path("/usr/lib/ladspa"), Path("/usr/local/lib/ladspa"), Path("/usr/lib64/ladspa")]
-    if multiarch := sysconfig.get_config_var("MULTIARCH"):
-        defaults += [Path("/usr/lib")/multiarch/"ladspa", Path("/usr/local/lib")/multiarch/"ladspa"]
-    roots = args.paths or ([Path(p).expanduser() for p in configured.split(os.pathsep) if p] if configured is not None else defaults)
-    paths = sorted({p.resolve() for root in roots for p in ([root] if root.is_file() else root.glob("*.so")) if p.is_file()})
+    roots = args.paths or ([Path(p).expanduser() for p in configured.split(os.pathsep) if p] if configured is not None else default_roots())
+    paths = library_candidates(roots)
     effects, failed = [], []
     for path in paths:
         if "\t" in str(path) or "\n" in str(path):
@@ -43,7 +74,7 @@ def main():
         try:
             proc = subprocess.run([str(args.probe.resolve()), str(path)], stdout=subprocess.PIPE,
                                   stderr=subprocess.DEVNULL, text=True, errors="replace", timeout=3,
-                                  cwd="/tmp")
+                                  cwd=tempfile.gettempdir())
         except (subprocess.TimeoutExpired, OSError):
             failed.append(str(path))
             continue

@@ -104,7 +104,7 @@ inline std::vector<EffectEntry> effect_library(const Catalog& catalog,unsigned c
         e.maker=plugin.maker;e.channels=plugin.channels;e.controls=plugin.controls;e.controls_complete=plugin.controls_complete;
         e.description="Scanned descriptor; processing not individually qualified";
         std::error_code ec;
-        e.compatible=channels>=1&&channels<=8&&(plugin.channels==1||channels==2)&&std::filesystem::is_regular_file(e.path,ec);
+        e.compatible=channels>=1&&channels<=8&&(plugin.channels==1||channels==2)&&std::filesystem::is_regular_file(platform::native_path(e.path),ec);
         entries.push_back(std::move(e));
     }
     return entries;
@@ -114,7 +114,7 @@ inline std::vector<EffectEntry> search_effects(const std::vector<EffectEntry>& e
     for(auto& e:entries){
         if(!format.empty()&&format!=e.format)continue;
         if(match_words(e.name+" "+e.category+" "+e.description+" "+e.format+" "+e.source+" "+e.maker+" "+e.label+" "+
-            std::filesystem::path(e.path).filename().string()+" "+(e.channels==1?"mono":e.channels==2?"stereo":""),query))
+            platform::utf8_path(platform::native_path(e.path).filename())+" "+(e.channels==1?"mono":e.channels==2?"stereo":""),query))
             result.push_back(e);
     }
     return result;
