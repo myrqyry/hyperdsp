@@ -12,6 +12,7 @@
 #include <thread>
 #include <array>
 #include "sound-signal-fixture.hpp"
+#include "latency-contention-fixture.hpp"
 
 
 struct Stats {
@@ -116,6 +117,12 @@ int main(int argc,char**argv){
         crush[0]>.2&&crush[0]<.5&&crush[1]<.001&&
         std::abs(bypass[0]-.282843)<.003&&std::abs(fallback[0]-bypass[0])<.004&&reactive[0]>.5;
     std::printf("COLOR_OBS clip=%g os=%g dry=%g crush=%g,%g bypass=%g reactive=%g fallback=%g pass=%d\n",clip[0],os[0],dry[0],crush[0],crush[1],bypass[0],reactive[0],fallback[0],ok);
+    obs_data_set_int(settings,"mode",3);obs_data_set_int(settings,"route1_source",0);
+    obs_data_set_double(settings,"mix",0);obs_data_set_double(settings,"input_db",0);obs_data_set_double(settings,"output_db",0);
+    obs_data_set_int(settings,"oversample",4);
+    obs_source_update(filter,settings);
+    bool continuous=latency_contention::verify(source,filter,settings,24,"drive",0,12);
+    ok=ok&&continuous;
     obs_set_output_source(1,nullptr);obs_source_dec_active(source);obs_source_filter_remove(source,filter);
     obs_source_release(filter);obs_source_release(source);obs_data_release(settings);obs_shutdown();return ok?0:1;
 }

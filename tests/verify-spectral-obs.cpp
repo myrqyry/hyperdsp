@@ -12,6 +12,7 @@
 #include <thread>
 #include <array>
 #include "sound-signal-fixture.hpp"
+#include "latency-contention-fixture.hpp"
 
 
 struct Stats {
@@ -159,6 +160,11 @@ int main(int argc,char**argv){
         smeared[0]>.08&&smeared[0]<.28&&std::abs(bypass[0]-.282843)<.002&&reactive[0]<.001&&
         std::abs(fallback[0]-bypass[0])<.003;
     std::printf("SPECTRAL_OBS gate=%g reconstruction=%g freeze=%g,%g release=%g smear=%g bypass=%g reactive=%g fallback=%g pass=%d\n",gated[0],reconstructed[0],frozen[0],frozen[1],released[0],smeared[0],bypass[0],reactive[0],fallback[0],ok);
+    obs_data_set_int(settings,"mode",1);obs_data_set_int(settings,"route1_source",0);
+    obs_data_set_double(settings,"mix",0);obs_data_set_double(settings,"input_db",0);obs_data_set_double(settings,"output_db",0);
+    obs_source_update(filter,settings);
+    bool continuous=latency_contention::verify(source,filter,settings,1024,"threshold",-30,-50);
+    ok=ok&&continuous;
     obs_set_output_source(1,nullptr);obs_source_dec_active(source);obs_source_filter_remove(source,filter);
     obs_source_release(filter);obs_source_release(source);obs_data_release(settings);obs_shutdown();return ok?0:1;
 }
