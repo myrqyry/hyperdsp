@@ -29,6 +29,7 @@
 #include <cstdio>
 #include <util/platform.h>
 #include <numbers>
+#include <optional>
 #include "framework/dsp/graph_monitor.hpp"
 #include "sound-signal-fixture.hpp"
 #include "sight-signal-fixture.hpp"
@@ -106,6 +107,25 @@ int main(int argc,char** argv){
                 return nullptr;
             };
             auto center=[&](QGraphicsItem* i){return graph->mapFromScene(i->sceneBoundingRect().center());};
+            // A cable can run behind a card, and viewport rounding varies
+            // with Qt/font metrics. Select an exposed point on this specific
+            // wire, not an assumed midpoint that might hit a node or port.
+            auto cablePoint=[&](QGraphicsPathItem* wire)->std::optional<QPoint>{
+                if(!wire)return {};
+                for(int step=0;step<=80;++step){
+                    double t=.5+(step%2?1:-1)*((step+1)/2)*.01;
+                    auto point=graph->mapFromScene(wire->mapToScene(wire->path().pointAtPercent(t)));
+                    if(!graph->viewport()->rect().contains(point))continue;
+                    QGraphicsItem* firstCable=nullptr;bool obstructed=false;
+                    for(auto* candidate:graph->items(point)){
+                        auto role=candidate->data(1).toString();
+                        if(role=="out"||role=="node"){obstructed=true;break;}
+                        if(role=="cable"&&!firstCable)firstCable=candidate;
+                    }
+                    if(!obstructed&&firstCable==wire)return point;
+                }
+                return {};
+            };
             auto drag=[&](QPoint from,QPoint to){
                 QTest::mousePress(graph->viewport(),Qt::LeftButton,Qt::NoModifier,from);
                 QTest::mouseMove(graph->viewport(),to,20);
@@ -125,10 +145,14 @@ int main(int argc,char** argv){
                 auto* path=item("cable",1,1);
                 if(path){
                     auto* cable=static_cast<QGraphicsPathItem*>(path);
-                    auto point=graph->mapFromScene(cable->path().pointAtPercent(.5));
-                    QTest::mouseClick(graph->viewport(),Qt::LeftButton,Qt::NoModifier,point);
-                    std::printf("CANVAS_SELECTED=%lld point=%d,%d\n",static_cast<long long>(graph->scene()->selectedItems().size()),point.x(),point.y());
-                    QTest::keyClick(graph,Qt::Key_Delete);QApplication::processEvents();
+                    auto point=cablePoint(cable);
+                    if(point){
+                        QTest::mouseClick(graph->viewport(),Qt::LeftButton,Qt::NoModifier,*point);
+                        const bool selected=graph->scene()->selectedItems().contains(cable);
+                        std::printf("CANVAS_SELECTED=%d point=%d,%d\n",selected,point->x(),point->y());
+                        canvas=canvas&&selected;
+                        QTest::keyClick(graph,Qt::Key_Delete);QApplication::processEvents();
+                    }else{std::printf("CANVAS_NO_EXPOSED_CABLE=1\n");canvas=false;}
                 }else canvas=false;
                 canvas=canvas&&builder.draft().value("nodes").toArray()[1].toObject().value("inputs").toArray().size()==1;
                 std::printf("CANVAS_DISCONNECT=%d\n",canvas);
@@ -159,10 +183,16 @@ int main(int argc,char** argv){
                 // The only input cable on node 0 cannot be removed accidentally.
                 auto* last=item("cable",0,0);
                 if(last){
-                    auto point=graph->mapFromScene(static_cast<QGraphicsPathItem*>(last)->path().pointAtPercent(.5));
-                    QTest::mouseClick(graph->viewport(),Qt::LeftButton,Qt::NoModifier,point);
-                    QTest::keyClick(graph,Qt::Key_Delete);
-                    canvas=canvas&&builder.draft()==valid;
+                    auto point=cablePoint(static_cast<QGraphicsPathItem*>(last));
+                    if(point){
+                        QTest::mousePress(graph->viewport(),Qt::LeftButton,Qt::NoModifier,*point);
+                        std::printf("LAST_PRESS=%d\n",graph->scene()->selectedItems().contains(last));
+                        QTest::mouseRelease(graph->viewport(),Qt::LeftButton,Qt::NoModifier,*point);
+                        const bool selected=graph->scene()->selectedItems().contains(last);
+                        std::printf("CANVAS_LAST_SELECTED=%d at %d,%d\n",selected,point->x(),point->y());canvas=canvas&&selected;
+                        QTest::keyClick(graph,Qt::Key_Delete);
+                        canvas=canvas&&builder.draft()==valid;
+                    }else {std::printf("CANVAS_LAST_NO_EXPOSED_POINT=1\n");canvas=false;}
                 }else canvas=false;
                 auto* node=item("node",1);
                 if(node)QTest::mouseClick(graph->viewport(),Qt::LeftButton,Qt::NoModifier,center(node));

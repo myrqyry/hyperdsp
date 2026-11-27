@@ -1016,7 +1016,7 @@ protected:
     }
     void mousePressEvent(QMouseEvent* e)override{
         if(e->button()==Qt::LeftButton){
-            setFocus();auto p=e->position().toPoint();
+            cablePressed_=false;setFocus();auto p=e->position().toPoint();
             if(auto* port=hit(p,"out")){
                 origin_=port->data(0).toInt();start_=port->sceneBoundingRect().center();
                 preview_=scene()->addPath(cablePath(start_,start_),QPen(GraphColors(palette()).accent,2,Qt::DashLine));
@@ -1030,7 +1030,7 @@ protected:
             }
         }
         if(e->button()==Qt::LeftButton)if(auto* cable=hit(e->position().toPoint(),"cable")){
-            scene()->clearSelection();cable->setSelected(true);e->accept();return;
+            scene()->clearSelection();cable->setSelected(true);cablePressed_=true;e->accept();return;
         }
         QGraphicsView::mousePressEvent(e);
     }
@@ -1050,6 +1050,10 @@ protected:
         QGraphicsView::mouseMoveEvent(e);
     }
     void mouseReleaseEvent(QMouseEvent* e)override{
+        // A cable press is handled here, not by QGraphicsView. Forwarding
+        // its unmatched release lets the default scene/hand-drag path clear
+        // the selection, making the subsequent Delete action unreliable.
+        if(e->button()==Qt::LeftButton&&cablePressed_){cablePressed_=false;e->accept();return;}
         if(e->button()==Qt::LeftButton&&preview_){
             auto* target=hit(e->position().toPoint(),"in");
             const int to=target?target->data(0).toInt():-3;
@@ -1079,6 +1083,7 @@ protected:
         if(menu.exec(e->globalPos())==remove&&disconnectCable)disconnectCable(to,row);
     }
     void focusOutEvent(QFocusEvent* e)override{
+        cablePressed_=false;
         if(preview_||moving_)cancel();
         QGraphicsView::focusOutEvent(e);
     }
@@ -1096,6 +1101,7 @@ public:
         moving_=nullptr;viewport()->unsetCursor();
     }
 private:
+    bool cablePressed_=false;
     QGraphicsPathItem* preview_=nullptr;
     QGraphicsItem* moving_=nullptr;
     int origin_=-3;
