@@ -29,6 +29,7 @@
 #include <cstdio>
 #include <util/platform.h>
 #include <numbers>
+#include <optional>
 #include "framework/dsp/graph_monitor.hpp"
 #include "sound-signal-fixture.hpp"
 #include "sight-signal-fixture.hpp"
@@ -106,6 +107,25 @@ int main(int argc,char** argv){
                 return nullptr;
             };
             auto center=[&](QGraphicsItem* i){return graph->mapFromScene(i->sceneBoundingRect().center());};
+            // A cable can run behind a card, and viewport rounding varies
+            // with Qt/font metrics. Select an exposed point on this specific
+            // wire, not an assumed midpoint that might hit a node or port.
+            auto cablePoint=[&](QGraphicsPathItem* wire)->std::optional<QPoint>{
+                if(!wire)return {};
+                for(int step=0;step<=80;++step){
+                    double t=.5+(step%2?1:-1)*((step+1)/2)*.01;
+                    auto point=graph->mapFromScene(wire->mapToScene(wire->path().pointAtPercent(t)));
+                    if(!graph->viewport()->rect().contains(point))continue;
+                    QGraphicsItem* firstCable=nullptr;bool obstructed=false;
+                    for(auto* candidate:graph->items(point)){
+                        auto role=candidate->data(1).toString();
+                        if(role=="out"||role=="node"){obstructed=true;break;}
+                        if(role=="cable"&&!firstCable)firstCable=candidate;
+                    }
+                    if(!obstructed&&firstCable==wire)return point;
+                }
+                return {};
+            };
             auto drag=[&](QPoint from,QPoint to){
                 QTest::mousePress(graph->viewport(),Qt::LeftButton,Qt::NoModifier,from);
                 QTest::mouseMove(graph->viewport(),to,20);
@@ -125,10 +145,14 @@ int main(int argc,char** argv){
                 auto* path=item("cable",1,1);
                 if(path){
                     auto* cable=static_cast<QGraphicsPathItem*>(path);
-                    auto point=graph->mapFromScene(cable->path().pointAtPercent(.5));
-                    QTest::mouseClick(graph->viewport(),Qt::LeftButton,Qt::NoModifier,point);
-                    std::printf("CANVAS_SELECTED=%lld point=%d,%d\n",static_cast<long long>(graph->scene()->selectedItems().size()),point.x(),point.y());
-                    QTest::keyClick(graph,Qt::Key_Delete);QApplication::processEvents();
+                    auto point=cablePoint(cable);
+                    if(point){
+                        QTest::mouseClick(graph->viewport(),Qt::LeftButton,Qt::NoModifier,*point);
+                        const bool selected=graph->scene()->selectedItems().contains(cable);
+                        std::printf("CANVAS_SELECTED=%d point=%d,%d\n",selected,point->x(),point->y());
+                        canvas=canvas&&selected;
+                        QTest::keyClick(graph,Qt::Key_Delete);QApplication::processEvents();
+                    }else{std::printf("CANVAS_NO_EXPOSED_CABLE=1\n");canvas=false;}
                 }else canvas=false;
                 canvas=canvas&&builder.draft().value("nodes").toArray()[1].toObject().value("inputs").toArray().size()==1;
                 std::printf("CANVAS_DISCONNECT=%d\n",canvas);
@@ -159,10 +183,16 @@ int main(int argc,char** argv){
                 // The only input cable on node 0 cannot be removed accidentally.
                 auto* last=item("cable",0,0);
                 if(last){
-                    auto point=graph->mapFromScene(static_cast<QGraphicsPathItem*>(last)->path().pointAtPercent(.5));
-                    QTest::mouseClick(graph->viewport(),Qt::LeftButton,Qt::NoModifier,point);
-                    QTest::keyClick(graph,Qt::Key_Delete);
-                    canvas=canvas&&builder.draft()==valid;
+                    auto point=cablePoint(static_cast<QGraphicsPathItem*>(last));
+                    if(point){
+                        QTest::mousePress(graph->viewport(),Qt::LeftButton,Qt::NoModifier,*point);
+                        std::printf("LAST_PRESS=%d\n",graph->scene()->selectedItems().contains(last));
+                        QTest::mouseRelease(graph->viewport(),Qt::LeftButton,Qt::NoModifier,*point);
+                        const bool selected=graph->scene()->selectedItems().contains(last);
+                        std::printf("CANVAS_LAST_SELECTED=%d at %d,%d\n",selected,point->x(),point->y());canvas=canvas&&selected;
+                        QTest::keyClick(graph,Qt::Key_Delete);
+                        canvas=canvas&&builder.draft()==valid;
+                    }else {std::printf("CANVAS_LAST_NO_EXPOSED_POINT=1\n");canvas=false;}
                 }else canvas=false;
                 auto* node=item("node",1);
                 if(node)QTest::mouseClick(graph->viewport(),Qt::LeftButton,Qt::NoModifier,center(node));
@@ -183,6 +213,61 @@ int main(int argc,char** argv){
                 themed=themed&&wire&&wire->pen().color()==accent;
                 themed=themed&&builder.styleSheet().isEmpty()&&apply->styleSheet().isEmpty();
             }
+            // Widget-specific host palette overrides and style sheets can differ
+            // from the top-level dock (as in OBS custom themes).
+            const auto previousGraphPalette=graph->palette();
+            const auto previousStyle=app.styleSheet();
+            auto local=previousGraphPalette;
+            const QColor localBase("#152831"),localText("#d4edea"),localAccent("#f0a948");
+            local.setColor(QPalette::Base,localBase);local.setColor(QPalette::Text,localText);
+            local.setColor(QPalette::Highlight,localAccent);local.setColor(QPalette::Button,QColor("#30414b"));
+            graph->setPalette(local);QTest::qWait(30);
+            auto* localWire=static_cast<QGraphicsPathItem*>(item("cable",1,1));
+            bool localTheme=graph->backgroundBrush().color()==localBase&&localWire&&localWire->pen().color()==localAccent;
+            app.setStyleSheet(previousStyle+"\nQGraphicsView#graph { background-color: #f3e3be; color: #252119; selection-background-color: #65318c; }");
+            QTest::qWait(50);
+            const QColor qssBase("#f3e3be"),qssAccent("#65318c");
+            bool qssTheme=graph->palette().color(QPalette::Base)==qssBase&&graph->backgroundBrush().color()==qssBase&&localWire&&localWire->pen().color()==qssAccent;
+            // Selection must remain visually distinct even with a near-flat
+            // theme, without replacing graph items or mutating the draft.
+            app.setStyleSheet(previousStyle);graph->setPalette(local);QTest::qWait(30);
+            auto* selected=static_cast<QGraphicsPathItem*>(item("node",1));
+            graph->scene()->clearSelection();QTest::qWait(20);auto normalPen=selected->pen();selected->setSelected(true);QTest::qWait(20);
+            bool selectedTheme=selected->pen().widthF()>normalPen.widthF()&&selected->pen().color()!=normalPen.color();
+            const auto selectedItems=graph->scene()->selectedItems();auto transform=graph->transform();
+            auto flat=local;flat.setColor(QPalette::Base,QColor("#333333"));flat.setColor(QPalette::Text,QColor("#363636"));flat.setColor(QPalette::Highlight,QColor("#353535"));flat.setColor(QPalette::Link,QColor("#343434"));flat.setColor(QPalette::Mid,QColor("#333333"));flat.setColor(QPalette::Button,QColor("#343434"));
+            graph->setPalette(flat);QTest::qWait(30);
+            auto luminance=[](QColor c){auto linear=[](double x){return x<=.04045?x/12.92:std::pow((x+.055)/1.055,2.4);};return .2126*linear(c.redF())+.7152*linear(c.greenF())+.0722*linear(c.blueF());};
+            auto contrast=[&](QColor a,QColor b){double x=luminance(a),y=luminance(b);return (std::max(x,y)+.05)/(std::min(x,y)+.05);};
+            bool contrastTheme=graph->backgroundBrush().color()==QColor("#333333")&&contrast(localWire->pen().color(),graph->backgroundBrush().color())>=3&&contrast(selected->pen().color(),selected->brush().color())>=3;
+            for(auto* child:selected->childItems())if(child->data(1).toString()=="label")contrastTheme=contrastTheme&&contrast(static_cast<QGraphicsSimpleTextItem*>(child)->brush().color(),selected->brush().color())>=4.5;
+            bool preserved=builder.draft()==beforeTheme&&originalNode==item("node",0)&&originalNode->pos()==originalPos&&graph->scene()->selectedItems()==selectedItems&&graph->transform()==transform;
+            // Actual custom plot rendering, including widgets in hidden tabs.
+            auto plotStyle=previousStyle+"\nQWidget[hyperdspThemePlot=\"true\"] { background-color: #202b30; color: #222d32; }";
+            app.setStyleSheet(plotStyle);QTest::qWait(40);
+            int plots=0;bool plotTheme=true;
+            for(auto* widget:builder.findChildren<QWidget*>())if(widget->property("hyperdspThemePlot").toBool()){
+                ++plots;widget->ensurePolished();
+                auto image=widget->grab().toImage();
+                const QColor background("#202b30");
+                plotTheme=plotTheme&&!image.isNull()&&image.pixelColor(0,0)==background;
+                // A low-contrast theme text role must not make the plot's
+                // axes or idle label disappear. Check rendered pixels.
+                int readablePixels=0;
+                for(int y=0;y<image.height();++y)for(int x=0;x<image.width();++x)
+                    if(contrast(image.pixelColor(x,y),background)>=4.0)++readablePixels;
+                plotTheme=plotTheme&&readablePixels>10;
+            }
+            app.setStyleSheet(previousStyle);QTest::qWait(30);
+            const auto originalFont=graph->font();auto localFont=originalFont;
+            localFont.setPointSizeF(13);graph->setFont(localFont);QTest::qWait(30);
+            bool fontTheme=true;for(auto* child:selected->childItems())if(child->data(1).toString()=="label")fontTheme=fontTheme&&static_cast<QGraphicsSimpleTextItem*>(child)->font().pointSizeF()==13;
+            graph->setFont(originalFont);
+            std::printf("BUILDER_THEME_PLOTS=%d COUNT=%d FONT=%d\n",plotTheme,plots,fontTheme);
+            themed=themed&&plots==5&&plotTheme&&fontTheme;
+            std::printf("BUILDER_THEME_LOCAL=%d QSS=%d SELECTION=%d CONTRAST=%d PRESERVED=%d\n",localTheme,qssTheme,selectedTheme,contrastTheme,preserved);
+            themed=themed&&localTheme&&qssTheme&&selectedTheme&&contrastTheme&&preserved;
+            graph->setPalette(QPalette());
             app.setPalette(originalPalette);QTest::qWait(30);
             std::printf("BUILDER_THEME_PASS=%d\n",themed);ok=ok&&themed;
             std::printf("BUILDER_CANVAS_PASS=%d\n",canvas);ok=ok&&canvas;

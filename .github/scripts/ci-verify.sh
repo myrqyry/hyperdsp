@@ -1,7 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 root="$(cd "$(dirname "$0")/../.." && pwd)"
-[[ "$TARGET" == linux-x86_64 && "$MODULE" == hyperdsp && "$PUBLIC_NAME" == hyperdsp ]]
+[[ "$MODULE" == hyperdsp && "$PUBLIC_NAME" == hyperdsp ]]
+if [[ "$TARGET" != linux-x86_64 ]]; then
+    pin=e9eb704437e606721ee92d7d064c4b8168fd8f53
+    engine="$RUNNER_TEMP/obs-ci-engine"
+    git init -q "$engine"
+    git -C "$engine" fetch --depth=1 https://github.com/myrqyry/obs-plugin-ci.git "$pin"
+    git -C "$engine" checkout --detach FETCH_HEAD
+    [[ "$(git -C "$engine" rev-parse HEAD)" == "$pin" ]]
+    rustup toolchain install 1.93.1 --profile minimal
+    cargo +1.93.1 build --release --locked --manifest-path "$engine/Cargo.toml"
+    exec python "$engine/scripts/native_caller.py" "$root"
+fi
 case "$OBS_VERSION" in
   32.2.0) layout=legacy ;;
   33.0.3) layout=modern ;;
@@ -9,7 +20,7 @@ case "$OBS_VERSION" in
 esac
 [[ "$ARCHIVE" == "hyperdsp-linux-x86_64-obs$OBS_VERSION-test.tar.gz" ]]
 sudo apt-get install -y --no-install-recommends ladspa-sdk libsamplerate0-dev
-pin=359da119f3dd3d1e2d392cbf7e65f5766221cc68
+pin=e9eb704437e606721ee92d7d064c4b8168fd8f53
 engine="$RUNNER_TEMP/obs-ci-engine"
 git init -q "$engine"
 git -C "$engine" fetch --depth=1 https://github.com/myrqyry/obs-plugin-ci.git "$pin"

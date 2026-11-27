@@ -105,6 +105,12 @@ class AuditionPanel final:public QWidget {
         buttons();
     }
     void refreshDevices(){
+#if defined(_WIN32) || defined(__APPLE__)
+        // Isolated rendering is portable; device playback still needs a
+        // native output backend. Do not select the system default silently.
+        status_->setText("Native playback is not yet available on this platform. Isolated A/B rendering is available.");
+        buttons();return;
+#endif
         if(discovery_.state()!=QProcess::NotRunning||playback_.state()!=QProcess::NotRunning)return;
         auto program=QStandardPaths::findExecutable("pactl");
         if(program.isEmpty()){status_->setText("Playback unavailable: pactl is not installed.");return;}

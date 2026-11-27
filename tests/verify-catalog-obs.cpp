@@ -17,9 +17,16 @@ int main(int argc,char** argv){
     const auto temp=fs::temp_directory_path()/("hyperdsp-catalog-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     fs::create_directories(temp);
     const auto output=temp/"catalog.json";
-    fs::create_symlink(fs::canonical(argv[3]),temp/"amp.so");
+    const auto fixture=fs::path(argv[3]);
+    const auto filename=fixture.filename().string();
+    fs::copy_file(fixture,temp/filename);
+#ifdef _WIN32
+    _putenv_s("HYPERDSP_CATALOG",output.string().c_str());
+    _putenv_s("LADSPA_PATH",temp.string().c_str());
+#else
     setenv("HYPERDSP_CATALOG",output.c_str(),1);
     setenv("LADSPA_PATH",temp.c_str(),1);
+#endif
     auto* settings=obs_data_create();
     auto* filter=obs_source_create_private("hyperdsp_ladspa_filter","catalog fixture",settings);
     auto* props=filter?obs_source_properties(filter):nullptr;
@@ -51,7 +58,7 @@ int main(int argc,char** argv){
         obs_data_set_string(settings,"catalog_search","no-such-effect");
         obs_property_modified(search,settings);
         ok=ok&&obs_property_list_item_count(list)==1;
-        obs_data_set_string(settings,"catalog_search","utility amp.so stereo");
+        obs_data_set_string(settings,"catalog_search",(std::string("utility ")+filename+" stereo").c_str());
         obs_property_modified(search,settings);
         ok=ok&&obs_property_list_item_count(list)==2;
     }

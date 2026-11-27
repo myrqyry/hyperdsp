@@ -93,10 +93,20 @@ QColor readable(QColor preferred,QColor bg,QColor alternative,double minimum){
     for(int i=1;i<=20;++i){auto candidate=blend(preferred,neutral,i/20.);if(contrast(candidate,bg)>=minimum)return candidate;}
     return neutral;
 }
+// QWidget palettes may be specialized by the host stylesheet, and inactive
+// or disabled windows may use different semantic roles. Never sample the
+// application's default when a more specific widget is being painted.
+QPalette effectivePalette(const QWidget* widget){
+    auto p=widget->palette();
+    p.setCurrentColorGroup(!widget->isEnabled()?QPalette::Disabled:
+        widget->isActiveWindow()?QPalette::Active:QPalette::Inactive);
+    return p;
+}
 struct GraphColors {
     QColor base,text,accent,edge,outline,terminal,native,external;
     explicit GraphColors(const QPalette& p){
-        base=p.color(QPalette::Base);text=p.color(QPalette::Text);
+        base=p.color(QPalette::Base);
+        text=readable(p.color(QPalette::Text),base,p.color(QPalette::WindowText),4.5);
         accent=readable(p.color(QPalette::Highlight),base,text,3);
         edge=readable(p.color(QPalette::Link),base,text,3);
         outline=readable(p.color(QPalette::Mid),base,text,3);
@@ -110,7 +120,7 @@ public:
     MonitorSpectrum analyzer;
     MonitorSpectrum::Bins input{},output{};
     bool valid=false;
-    explicit MonitorPlot(QWidget* parent):QWidget(parent){setMinimumHeight(200);setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Expanding);}
+    explicit MonitorPlot(QWidget* parent):QWidget(parent){setProperty("hyperdspThemePlot",true);setBackgroundRole(QPalette::Base);setForegroundRole(QPalette::Text);setMinimumHeight(200);setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Expanding);}
     void setFrame(const GraphMonitorFrame& next){
         if(!valid||frame.sequence!=next.sequence||frame.epoch!=next.epoch){
             frame=next;input=analyzer.analyze(frame.input);output=analyzer.analyze(frame.output);
@@ -121,8 +131,8 @@ public:
 protected:
     void paintEvent(QPaintEvent*)override{
         QPainter p(this);p.setRenderHint(QPainter::Antialiasing);
-        GraphColors colors(palette());
-        QColor in=readable(palette().color(QPalette::Link),colors.base,colors.text,3);
+        GraphColors colors(effectivePalette(this));
+        QColor in=colors.edge;
         QColor out=colors.accent;
         p.fillRect(rect(),colors.base);p.setPen(colors.text);
         const int left=43,right=9,top=23,bottom=19;
@@ -176,7 +186,7 @@ class LiveAnalysisPlot final:public QWidget {
     int view_=1;
     bool valid_=false;
 public:
-    explicit LiveAnalysisPlot(QWidget* parent):QWidget(parent){setMinimumHeight(180);setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Expanding);}
+    explicit LiveAnalysisPlot(QWidget* parent):QWidget(parent){setProperty("hyperdspThemePlot",true);setBackgroundRole(QPalette::Base);setForegroundRole(QPalette::Text);setMinimumHeight(180);setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Expanding);}
     void setView(int view){view_=view;update();}
     void setFrame(const GraphMonitorFrameV2& frame,const MonitorSpectrum::Bins& input,const MonitorSpectrum::Bins& output){
         frame_=frame;difference_=spectrum_difference(input,output);valid_=true;update();
@@ -184,7 +194,7 @@ public:
     void clear(){valid_=false;update();}
 protected:
     void paintEvent(QPaintEvent*)override{
-        QPainter p(this);p.setRenderHint(QPainter::Antialiasing);GraphColors c(palette());
+        QPainter p(this);p.setRenderHint(QPainter::Antialiasing);GraphColors c(effectivePalette(this));
         p.fillRect(rect(),c.base);p.setPen(c.text);
         if(!valid_){p.drawText(rect(),Qt::AlignCenter,"Waiting for audio");return;}
         const QColor grid=blend(c.base,c.text,.19);
@@ -266,7 +276,7 @@ class NodeAnalysisPlot final:public QWidget {
         update();edit_(configured_,3,finished);
     }
 public:
-    explicit NodeAnalysisPlot(QWidget* parent):QWidget(parent){setMinimumHeight(170);}
+    explicit NodeAnalysisPlot(QWidget* parent):QWidget(parent){setProperty("hyperdspThemePlot",true);setBackgroundRole(QPalette::Base);setForegroundRole(QPalette::Text);setMinimumHeight(170);}
     void setNode(NodeTelemetry node,unsigned rate){node_=node;rate_=rate;update();}
     void clear(){setNode({},0);}
     void setEditor(std::function<void(NodeTelemetry,unsigned,bool)> cb){edit_=std::move(cb);setMouseTracking(true);}
@@ -296,7 +306,7 @@ protected:
         QWidget::wheelEvent(e);
     }
     void paintEvent(QPaintEvent*)override{
-        QPainter p(this);p.setRenderHint(QPainter::Antialiasing);GraphColors c(palette());
+        QPainter p(this);p.setRenderHint(QPainter::Antialiasing);GraphColors c(effectivePalette(this));
         p.fillRect(rect(),c.base);p.setPen(c.text);
         if(node_.kind==TelemetryKind::None&&!editRate_){p.drawText(rect(),Qt::AlignCenter,"No supported node telemetry");return;}
         QColor grid=blend(c.base,c.text,.18);
@@ -396,7 +406,7 @@ class CrossoverEditor final:public QWidget {
 public:
     CrossoverEditor(std::function<void(unsigned,double)> commit,std::function<void(unsigned)> select,QWidget* parent)
         :QWidget(parent),commit_(std::move(commit)),select_(std::move(select)){
-        setObjectName("bandCrossover");setFixedHeight(76);setMouseTracking(true);
+        setObjectName("bandCrossover");setProperty("hyperdspThemePlot",true);setBackgroundRole(QPalette::Base);setForegroundRole(QPalette::Text);setFixedHeight(76);setMouseTracking(true);
     }
     void setConfig(double low,double high,unsigned rate){
         if(dragging_>=0)return;
@@ -427,14 +437,14 @@ protected:
         QWidget::mouseReleaseEvent(e);
     }
     void paintEvent(QPaintEvent*)override{
-        QPainter p(this);p.setRenderHint(QPainter::Antialiasing);GraphColors c(palette());p.fillRect(rect(),c.base);
+        QPainter p(this);p.setRenderHint(QPainter::Antialiasing);GraphColors c(effectivePalette(this));p.fillRect(rect(),c.base);
         std::array<double,4> boundaries{12,x(frequencies_[0]),x(frequencies_[1]),double(width()-12)};
         QRectF area(12,23,width()-24,height()-31);
         if(area.width()<40)return;
         for(unsigned i=0;i<3;++i){
             QRectF region(boundaries[i],area.top(),boundaries[i+1]-boundaries[i],area.height());
-            p.fillRect(region,blend(c.base,c.accent,i==band_?.20:.06));
-            p.setPen(c.text);p.drawText(region.adjusted(2,0,-2,0),Qt::AlignCenter,QStringList{"Low","Mid","High"}[i]);
+            const auto fill=blend(c.base,c.accent,i==band_?.20:.06);p.fillRect(region,fill);
+            p.setPen(readable(c.text,fill,c.text,4.5));p.drawText(region.adjusted(2,0,-2,0),Qt::AlignCenter,QStringList{"Low","Mid","High"}[i]);
         }
         p.setPen(c.text);p.drawText(QRectF(4,1,width()-8,20),Qt::AlignCenter,
             QString("%1 Hz  ·  %2 Hz").arg(frequencies_[0],0,'f',0).arg(frequencies_[1],0,'f',0));
@@ -869,11 +879,11 @@ protected:
 class ResponsePlot final:public QWidget {
     std::vector<PreviewPoint> points_;
 public:
-    explicit ResponsePlot(QWidget* parent):QWidget(parent){setMinimumHeight(170);}
+    explicit ResponsePlot(QWidget* parent):QWidget(parent){setProperty("hyperdspThemePlot",true);setBackgroundRole(QPalette::Base);setForegroundRole(QPalette::Text);setMinimumHeight(170);}
     void setResponse(const std::vector<PreviewPoint>& points){points_=points;update();}
 protected:
     void paintEvent(QPaintEvent*)override{
-        QPainter p(this);p.setRenderHint(QPainter::Antialiasing);GraphColors c(palette());
+        QPainter p(this);p.setRenderHint(QPainter::Antialiasing);GraphColors c(effectivePalette(this));
         p.fillRect(rect(),c.base);p.setPen(c.text);
         QRectF area(45,23,width()-54,height()-46);
         p.drawText(QRectF(4,2,width()-8,18),Qt::AlignLeft,"Measured magnitude · dB");
@@ -988,6 +998,13 @@ QPainterPath cablePath(QPointF a,QPointF b,double laneHint=-10000){
     }
     return path;
 }
+class NodeItem final:public QGraphicsPathItem {
+public:
+    explicit NodeItem(const QPainterPath& path):QGraphicsPathItem(path){}
+    void paint(QPainter* painter,const QStyleOptionGraphicsItem*,QWidget*)override{
+        painter->setPen(pen());painter->setBrush(brush());painter->drawPath(path());
+    }
+};
 class CableItem final:public QGraphicsPathItem {
 public:
     explicit CableItem(QPainterPath path):QGraphicsPathItem(path){}
@@ -1008,18 +1025,24 @@ public:
     }
     std::function<void(int,int)> connectPorts,disconnectCable;
     std::function<void(int,QPointF)> moved;
-    std::function<void()> finishedMove;
+    std::function<void()> finishedMove,themeChanged;
 protected:
+    bool event(QEvent* e)override{
+        const auto type=e->type();
+        const bool result=QGraphicsView::event(e);
+        if(themeChanged&&(type==QEvent::PaletteChange||type==QEvent::ApplicationPaletteChange||type==QEvent::StyleChange||type==QEvent::EnabledChange||type==QEvent::WindowActivate||type==QEvent::WindowDeactivate||type==QEvent::FontChange||type==QEvent::Polish))themeChanged();
+        return result;
+    }
     QGraphicsItem* hit(QPoint point,const QString& role)const{
         for(auto* i:items(point))if(i->data(1).toString()==role)return i;
         return nullptr;
     }
     void mousePressEvent(QMouseEvent* e)override{
         if(e->button()==Qt::LeftButton){
-            setFocus();auto p=e->position().toPoint();
+            cablePressed_=false;setFocus();auto p=e->position().toPoint();
             if(auto* port=hit(p,"out")){
                 origin_=port->data(0).toInt();start_=port->sceneBoundingRect().center();
-                preview_=scene()->addPath(cablePath(start_,start_),QPen(GraphColors(palette()).accent,2,Qt::DashLine));
+                preview_=scene()->addPath(cablePath(start_,start_),QPen(GraphColors(effectivePalette(this)).accent,2,Qt::DashLine));
                 preview_->setData(1,"preview");preview_->setZValue(5);viewport()->setCursor(Qt::CrossCursor);e->accept();return;
             }
             if(auto* node=hit(p,"node")){
@@ -1030,7 +1053,7 @@ protected:
             }
         }
         if(e->button()==Qt::LeftButton)if(auto* cable=hit(e->position().toPoint(),"cable")){
-            scene()->clearSelection();cable->setSelected(true);e->accept();return;
+            scene()->clearSelection();cable->setSelected(true);cablePressed_=true;e->accept();return;
         }
         QGraphicsView::mousePressEvent(e);
     }
@@ -1050,6 +1073,10 @@ protected:
         QGraphicsView::mouseMoveEvent(e);
     }
     void mouseReleaseEvent(QMouseEvent* e)override{
+        // A cable press is handled here, not by QGraphicsView. Forwarding
+        // its unmatched release lets the default scene/hand-drag path clear
+        // the selection, making the subsequent Delete action unreliable.
+        if(e->button()==Qt::LeftButton&&cablePressed_){cablePressed_=false;e->accept();return;}
         if(e->button()==Qt::LeftButton&&preview_){
             auto* target=hit(e->position().toPoint(),"in");
             const int to=target?target->data(0).toInt():-3;
@@ -1079,6 +1106,7 @@ protected:
         if(menu.exec(e->globalPos())==remove&&disconnectCable)disconnectCable(to,row);
     }
     void focusOutEvent(QFocusEvent* e)override{
+        cablePressed_=false;
         if(preview_||moving_)cancel();
         QGraphicsView::focusOutEvent(e);
     }
@@ -1096,6 +1124,7 @@ public:
         moving_=nullptr;viewport()->unsetCursor();
     }
 private:
+    bool cablePressed_=false;
     QGraphicsPathItem* preview_=nullptr;
     QGraphicsItem* moving_=nullptr;
     int origin_=-3;
@@ -1149,11 +1178,12 @@ EffectBuilder::EffectBuilder(QWidget* parent,QString storagePath,QString bundled
     auto* split=new QSplitter(Qt::Vertical);
     auto* viewPanel=new QWidget;auto* viewLayout=new QVBoxLayout(viewPanel);viewLayout->setContentsMargins(0,0,0,0);
     scene_=new QGraphicsScene(this);auto* canvas=new Canvas(scene_);graph_=canvas;
+    canvas->themeChanged=[this]{scheduleThemeRefresh();};
     canvas->connectPorts=[this](int from,int to){connectPorts(from,to);};
     canvas->disconnectCable=[this](int to,int row){disconnectCable(to,row);};
     canvas->moved=[this](int id,QPointF pos){updateNodePosition(id,pos);};
     canvas->finishedMove=[this]{scene_->setSceneRect(scene_->itemsBoundingRect().adjusted(-30,-30,30,30));};graph_->setObjectName("graph");graph_->setRenderHint(QPainter::Antialiasing);
-    graph_->setBackgroundBrush(palette().color(QPalette::Base));graph_->setDragMode(QGraphicsView::ScrollHandDrag);graph_->setMinimumHeight(160);
+    graph_->setBackgroundBrush(effectivePalette(graph_).color(QPalette::Base));graph_->setDragMode(QGraphicsView::ScrollHandDrag);graph_->setMinimumHeight(160);
     viewLayout->addWidget(graph_,1);
     auto* outputRow=new QHBoxLayout;outputRow->addWidget(new QLabel("Output"));
     output_=new QComboBox;output_->setObjectName("outputNode");outputRow->addWidget(output_,1);
@@ -1233,6 +1263,7 @@ EffectBuilder::EffectBuilder(QWidget* parent,QString storagePath,QString bundled
     connect(scan,&QPushButton::clicked,this,[this]{message(qs(CatalogScan::start()));});
     connect(reload,&QPushButton::clicked,this,[this]{inventory_=inventory();refreshLibrary();inspect();refreshMacros();message(qs(CatalogScan::status()));});
     connect(scene_,&QGraphicsScene::selectionChanged,this,[this,tabs]{
+        scheduleThemeRefresh();
         auto items=scene_->selectedItems();if(items.isEmpty())return;
         auto* item=items.first();
         if(item->data(1).toString()=="node")selected_=item->data(0).toInt();
@@ -1263,7 +1294,12 @@ EffectBuilder::EffectBuilder(QWidget* parent,QString storagePath,QString bundled
     recoverAtStartup();refreshPresets();
     autosave_.setInterval(500);connect(&autosave_,&QTimer::timeout,this,[this]{saveRecovery();});autosave_.start();
 }
-EffectBuilder::~EffectBuilder(){autosave_.stop();saveRecovery();}
+EffectBuilder::~EffectBuilder(){
+    autosave_.stop();saveRecovery();
+    disconnect(scene_,nullptr,this,nullptr);
+    static_cast<Canvas*>(graph_)->themeChanged={};
+    status_=nullptr;
+}
 BuilderDocument EffectBuilder::document()const{return {draft_,positions_,{}};}
 void EffectBuilder::restoreDocument(const BuilderDocument& d){
     draft_=d.graph;positions_=d.positions;
@@ -1372,14 +1408,22 @@ void EffectBuilder::refreshPresets(){
 void EffectBuilder::message(const QString& s,bool error){
     statusError_=error;status_->setText(error?"Error: "+s:s);refreshTheme();
 }
+void EffectBuilder::scheduleThemeRefresh(){
+    if(!status_||themeRefreshPending_)return;
+    themeRefreshPending_=true;
+    // Qt propagates palette/style changes to children after the parent event.
+    // Coalesce that burst, then sample the final styled graph palette.
+    QTimer::singleShot(0,this,[this]{themeRefreshPending_=false;refreshTheme();});
+}
 void EffectBuilder::changeEvent(QEvent* event){
     QWidget::changeEvent(event);
-    if((event->type()==QEvent::PaletteChange||event->type()==QEvent::ApplicationPaletteChange||event->type()==QEvent::StyleChange)&&status_)
-        refreshTheme();
+    const auto type=event->type();
+    if(type==QEvent::PaletteChange||type==QEvent::ApplicationPaletteChange||type==QEvent::StyleChange||type==QEvent::EnabledChange||type==QEvent::ActivationChange||type==QEvent::FontChange)
+        scheduleThemeRefresh();
 }
 void EffectBuilder::refreshTheme(){
     if(!status_)return;
-    const GraphColors c(palette());
+    const GraphColors c(effectivePalette(graph_));
     graph_->setBackgroundBrush(c.base);
     for(auto* item:scene_->items()){
         auto role=item->data(1).toString();
@@ -1387,11 +1431,20 @@ void EffectBuilder::refreshTheme(){
             auto* node=static_cast<QGraphicsPathItem*>(item);
             auto kind=item->data(3).toString();
             QColor fill=kind=="terminal"?c.terminal:kind=="ladspa"?c.external:c.native;
-            node->setBrush(fill);node->setPen(QPen(c.outline));
-            for(auto* child:node->childItems())if(child->data(1).toString()=="label")
-                static_cast<QGraphicsSimpleTextItem*>(child)->setBrush(readable(c.text,fill,c.text,4.5));
+            node->setBrush(fill);
+            node->setPen(QPen(readable(node->isSelected()?c.accent:c.outline,fill,c.text,3),node->isSelected()?2.5:1.0));
+            for(auto* child:node->childItems())if(child->data(1).toString()=="label"){
+                auto* label=static_cast<QGraphicsSimpleTextItem*>(child);
+                auto font=graph_->font();
+                // Keep the fixed-size card readable even with oversized host fonts.
+                while(QFontMetricsF(font).height()>32&&font.pointSizeF()>6)font.setPointSizeF(font.pointSizeF()-1);
+                label->setFont(font);
+                label->setText(QFontMetrics(font).elidedText(child->data(5).toString(),Qt::ElideRight,int(node->path().boundingRect().width())-20));
+                label->setPos(10,(52-label->boundingRect().height())/2);
+                label->setBrush(readable(c.text,fill,c.text,4.5));
+            }
         }else if(role=="in"||role=="out"){
-            auto* port=static_cast<QGraphicsEllipseItem*>(item);port->setPen(QPen(c.text,1.2));port->setBrush(c.accent);
+            auto* port=static_cast<QGraphicsEllipseItem*>(item);port->setPen(QPen(readable(c.text,c.accent,c.base,3),1.2));port->setBrush(c.accent);
         }else if(role=="cable"){
             auto* wire=static_cast<QGraphicsPathItem*>(item);
             bool inverted=item->data(3).toBool();wire->setPen(QPen(inverted?c.edge:c.accent,2,inverted?Qt::DashLine:Qt::SolidLine));
@@ -1399,12 +1452,15 @@ void EffectBuilder::refreshTheme(){
         }else if(role=="preview"){
             static_cast<QGraphicsPathItem*>(item)->setPen(QPen(c.accent,2,Qt::DashLine));
         }else if(role=="weight"){
-            static_cast<QGraphicsSimpleTextItem*>(item)->setBrush(c.text);
+            auto* label=static_cast<QGraphicsSimpleTextItem*>(item);label->setFont(graph_->font());label->setBrush(c.text);
         }
     }
     // Textual error status remains distinguishable even in monochrome themes.
     auto font=status_->font();font.setBold(statusError_);status_->setFont(font);
     graph_->viewport()->update();
+    // Ordinary widgets repaint themselves on Qt palette/style events.
+    // Explicitly invalidate only custom-painted plot surfaces.
+    for(auto* child:findChildren<QWidget*>())if(child->property("hyperdspThemePlot").toBool())child->update();
 }
 void EffectBuilder::refreshTargets(){
     auto old=target_->currentData();std::vector<Target> targets;obs_enum_sources(collect_source,&targets);
@@ -1459,14 +1515,15 @@ void EffectBuilder::redraw(){
     positions_.try_emplace(output_id,142+std::min(count,3)*188,28);
     for(int i=0;i<count;++i)positions_.try_emplace(i,142+(i%3)*188,28+(i/3)*110);
     auto card=[this](QString text,int id,int width,QString kind){
-        const GraphColors c(palette());
+        const GraphColors c(effectivePalette(graph_));
         QPainterPath shape;shape.addRoundedRect(QRectF(0,0,width,52),8,8);
-        auto* box=scene_->addPath(shape,QPen(c.outline),QBrush(kind=="terminal"?c.terminal:kind=="ladspa"?c.external:c.native));
+        auto* box=new NodeItem(shape);scene_->addItem(box);
+        box->setPen(QPen(c.outline));box->setBrush(kind=="terminal"?c.terminal:kind=="ladspa"?c.external:c.native);
         box->setData(0,id);box->setData(1,"node");box->setData(3,kind);box->setPos(positions_.at(id));box->setZValue(2);
         box->setToolTip(text+" · Drag to move");
         if(id>=0){box->setFlag(QGraphicsItem::ItemIsSelectable);box->setSelected(id==selected_);}
         auto* label=new QGraphicsSimpleTextItem(QFontMetrics(QApplication::font()).elidedText(text,Qt::ElideRight,width-20),box);
-        label->setData(1,"label");label->setBrush(c.text);label->setPos(10,16);
+        label->setData(1,"label");label->setData(5,text);label->setBrush(c.text);label->setPos(10,16);
         for(bool outgoing:{false,true}){
             if((id==input_id&&!outgoing)||(id==output_id&&outgoing))continue;
             auto* port=new QGraphicsEllipseItem((outgoing?width:0)-5,21,10,10,box);
@@ -1498,7 +1555,7 @@ void EffectBuilder::redrawWires(){
             if(id!=from&&id!=to&&pos.x()<std::max(a.x(),b.x())&&pos.x()+156>std::min(a.x(),b.x()))
                 lane=std::max(lane,pos.y()+74);
         }
-        auto path=cablePath(a,b,lane);const GraphColors c(palette());const QColor color=weight<0?c.edge:c.accent;
+        auto path=cablePath(a,b,lane);const GraphColors c(effectivePalette(graph_));const QColor color=weight<0?c.edge:c.accent;
         auto* item=new CableItem(path);item->setData(0,to);item->setData(1,"cable");item->setData(2,row);
         item->setData(3,weight<0);item->setData(4,c.text);item->setPen(QPen(color,2,weight<0?Qt::DashLine:Qt::SolidLine));item->setZValue(0);item->setFlag(QGraphicsItem::ItemIsSelectable);
         item->setToolTip(to>=0?"Select and Delete, or right-click to disconnect":"Drag another output to the Output port to reroute");

@@ -73,7 +73,7 @@ def main():
             continue
         try:
             proc = subprocess.run([str(args.probe.resolve()), str(path)], stdout=subprocess.PIPE,
-                                  stderr=subprocess.DEVNULL, text=True, errors="replace", timeout=3,
+                                  stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace", timeout=3,
                                   cwd=tempfile.gettempdir())
         except (subprocess.TimeoutExpired, OSError):
             failed.append(str(path))
@@ -102,7 +102,7 @@ def main():
             if len(parts) not in (4,5) or parts[3] not in ("1","2") or not parts[0] or not parts[1]:
                 continue
             label,name,maker,channels = parts[:4]
-            current=dict(path=str(path), label=label, name=name, maker=maker,
+            current=dict(path=path.as_posix(), label=label, name=name, maker=maker,
                          channels=int(channels), category=category(name+" "+label))
             if len(parts)==5 and parts[4].isdigit() and int(parts[4])<=256:
                 expected=int(parts[4]);current["controls"]=[]

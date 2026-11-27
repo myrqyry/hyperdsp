@@ -4,14 +4,20 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import shutil
 
 scanner, probe, plugin = map(Path, sys.argv[1:])
 with tempfile.TemporaryDirectory() as tmp:
     root=Path(tmp)
     first=root/"first";first.mkdir()
     second=root/"second";second.mkdir()
-    (first/"amp.so").symlink_to(plugin.resolve())
-    (second/"alias.so").symlink_to(plugin.resolve())
+    if sys.platform == "win32":
+        # Windows runners need not have permission to create symlinks.
+        shutil.copy2(plugin, first / plugin.name)
+        second=first / "."
+    else:
+        (first/("amp"+plugin.suffix)).symlink_to(plugin.resolve())
+        (second/("alias"+plugin.suffix)).symlink_to(plugin.resolve())
     output=root/"catalog.json"
     env=dict(os.environ,LADSPA_PATH=os.pathsep.join(map(str,[first,second])))
     result=subprocess.run([sys.executable,str(scanner),"--probe",str(probe),"--output",str(output)],env=env,check=True,capture_output=True,text=True)

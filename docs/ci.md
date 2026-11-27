@@ -1,7 +1,7 @@
 # CI qualification
 
-Shared obs-plugin-ci pin 359da119f3dd3d1e2d392cbf7e65f5766221cc68.
-Linux profile: OBS32.2.0 on Ubuntu24 and OBS33.0.3 on Ubuntu26.
+Shared obs-plugin-ci pin e9eb704437e606721ee92d7d064c4b8168fd8f53.
+Full profile: OBS 32.2.0 and 33.0.3 on Linux x86-64, Windows x64, macOS Intel and macOS Apple Silicon.
 The first HyperDSP CI workflow originally required all 54 named tests; the current inventory is 59; the
 JUnit gate rejects missing, extra, skipped or failed tests. Qt Builder,
 Clock Sync and LADSPA SDK fixture support must remain enabled.
@@ -21,7 +21,7 @@ has 17 regular files. Modern layout tested using the OBS32 binary, not
 proof of OBS33 ABI/runtime support. Native hosted SDK qualification
 remains pending. Windows/macOS need a real portability pass for POSIX
 dynamic loading, scanner process lifecycle and dependencies; no nominal
-matrix coverage by disabling features. Private repository stays private.
+matrix coverage by disabling features. No visibility changes are performed by qualification.
 
 ## Host portability checkpoint
 
@@ -43,3 +43,96 @@ Both extracted 17-file Linux packages passed real LADSPA scanner and
 CLI checks. Full Linux regression subsequently passed all 56 named tests,
 with zero failures or skips. Both layouts used the OBS32.2.0 binary;
 this is not OBS33 ABI qualification.
+
+## Hosted OBS 33 regression (run 45919855507)
+
+OBS 32.2 passed 54/54; OBS 33.0.3 compiled and passed 52/54, with failures
+in the Effect Builder canvas and Spectral partition test. The Builder's
+custom cable press selected the cable, but its unmatched Qt base-class
+release could clear that selection. Paired event handling now preserves
+selection through release. The widget test chooses an exposed point on
+the intended wire, verifies actual selection and disconnect/reconnect,
+and exercises last-input rejection instead of relying on an unchanged
+JSON result when no cable was selected.
+
+The exact Spectral failure reproduced locally with GCC 15.2.0 at
+`-O3 -DNDEBUG -march=x86-64-v3`: Smear 44.1 kHz, first mismatch sample 1254,
+maximum absolute difference 6.23614e-6 (limit 1e-6). GCC15 baseline passed;
+contract-off, vectorization-off and no-inline experiments isolated a
+compiler-specialization/contraction difference. Keeping the FFT-hop body
+out of line restores identical block/scalar results, with no changes to
+algorithm, tolerance, FFT size or global optimization options. GCC15
+baseline/v3/native and GCC13/Clang18 native builds now report zero partition
+and latency-alignment error. The same native test logs the first mismatch
+and maxima if a future compiler regresses. Hosted OBS33 rerun is required
+for confirmation; this is not a new hardware or listening benchmark.
+
+## Native matrix pilot
+
+The hosted Linux rerun at bcbb632 (run 45942590209) passed both OBS
+32.2.0 and OBS 33.0.3 with the complete 56-test inventory. The native
+Windows x64, macOS Intel, and macOS arm64 caller now uses shared CI
+engine e9eb704 and the pinned native libobs/frontend imported targets.
+The existing Linux recipe and artifact policy remain unchanged.
+
+Native dependency source archives are SHA-256 pinned in
+`.github/scripts/ci-native.py`: Jansson 2.14.1 (MIT), libsamplerate
+0.2.2 (BSD), LADSPA SDK 1.17 (LGPL API header). The first two are built
+statically and notices are staged. No unrelated plugin runtime libraries
+are copied. The native fixture is a test-only amplifier implementing the
+SDK example port contract, built for the target architecture and excluded
+from the package. All 56 HyperDSP cases are required on each native leg;
+no dependency self-tests or skipped required project cases are permitted.
+The native hook also tests the staged module's catalog callback and actual
+installed probe/scanner/CLI, verifies notice and preset hashes, checks the
+package inventory and creates the correct Windows layout or macOS bundle.
+The SDK and runtime test paths are isolated. Python 3 remains a required
+external scanner dependency. The standalone CLI requires the matching OBS
+runtime to be discoverable by the system loader.
+
+Manual portable dependency build: unpack the three pinned source archives
+into a user-owned directory with their original top-level directory names,
+then configure with `-DHYPERDSP_PORTABLE_DEPS=ON`,
+`-DHYPERDSP_DEPS_ROOT=/path/to/deps`, `-DHYPERDSP_NATIVE_FIXTURE=ON`,
+`-DHYPERDSP_REQUIRE_BUILDER=ON`, `-DBUILD_TESTING=ON`.
+On Windows/macOS also use `-DHYPERDSP_NATIVE_SDK=ON` and configure the
+matching OBS libobs/frontend and Qt6 SDK locations through CMake.
+Native qualification requires actual hosted results, not just CMake
+configuration. A/B isolated audition rendering is retained; audible output
+selection/playback on Windows and macOS is still unimplemented (Linux
+PulseAudio/PipeWire tools remain unchanged). No native audio device or
+physical listening claims are made by the CI suite.
+
+Local portable source-dependency qualification: all 56 project cases in
+the first run passed (13 dependency self-tests were inadvertently registered
+but not built; corrected the CMake cache scope and independently verified
+the exact 56-name registration). Native imported SDK configuration also
+registered exactly 56 cases against the local OBS SDK. The 20-file staged
+Linux package passed actual libobs catalog callback, probe/scan, CLI and
+Unicode-path discovery. The first staged CLI run exposed a missing return
+when extracting the common entry point; explicit return and rerun passed.
+These are same-host Linux results, not Windows/macOS runtime confirmation.
+
+
+## Reconciled real-time optimization qualification (2026-11-27)
+
+The previous full matrix (run 45960030248) passed both Linux legs but all
+six Windows/macOS legs stopped at dependency configuration: CMake 4 removed
+compatibility with the old Jansson minimum policy version. Reproduced on
+Linux with CMake 4.2.3; after addressing Jansson, the same issue surfaced in
+libsamplerate. Both pinned dependencies now use a dependency-scoped policy
+floor of 3.5 on CMake 4+, preserving a caller's higher floor. Archive
+versions and hashes remain unchanged. No test or feature is disabled.
+
+Reconciled the real-time optimization branch with main, including the local
+Builder theme checkpoint 0e740cf. A fresh Linux Release build using
+CMake 4.2.3, the pinned source dependencies and the native amplifier fixture
+registered exactly 59 tests; 59/59 passed (51.91 s), and the JUnit inventory
+gate accepted all 59. The staged 20-file package passed the real libobs
+catalog, installed scanner, CLI and isolated three-track mixed-output
+tests (187 contiguous blocks, zero errors). GCC 15.2 x86-64-v3 FFT and
+spectral tests passed with zero packet-partition error.
+
+Both hosted Linux and native callers require all 59 cases. Hosted
+qualification of the reconciled commit is still required before claiming
+Windows/macOS support; a local CMake 4 result does not substitute for it.
