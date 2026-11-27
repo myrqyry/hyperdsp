@@ -11,6 +11,8 @@
 #include <QComboBox>
 #include <QWheelEvent>
 #include <array>
+#include <atomic>
+#include <thread>
 #include <numbers>
 #include <cstdio>
 using namespace hyperdsp;
@@ -58,6 +60,30 @@ int main(int argc,char** argv){
         };
         stream();QTest::qWait(80);ok=ok&&read()&&frame.rate==48000&&frame.node.kind!=TelemetryKind::None;
         auto n=frame.node;
+        std::atomic<bool> telemetry_done{false},telemetry_ok{true};
+        std::atomic<unsigned> telemetry_reads{0},telemetry_ready{0};
+        std::array<std::thread,2> telemetry_readers;
+        for(auto& reader:telemetry_readers)reader=std::thread([&]{
+            uint64_t previous=0;++telemetry_ready;
+            do{
+                FilterTelemetryFrame snapshot{};
+                calldata_t d;calldata_init(&d);calldata_set_ptr(&d,"frame",&snapshot);
+                bool ready=proc_handler_call(obs_source_get_proc_handler(f),"hyperdsp_filter_telemetry_v1",&d)&&calldata_bool(&d,"available");
+                calldata_free(&d);
+                if(!ready)continue;
+                if(snapshot.rate!=48000||snapshot.node.kind!=n.kind||snapshot.stamp<previous||snapshot.epoch!=frame.epoch)telemetry_ok=false;
+                for(float v:snapshot.node.peak)if(!std::isfinite(v))telemetry_ok=false;
+                for(float v:snapshot.node.gain_db)if(!std::isfinite(v))telemetry_ok=false;
+                previous=snapshot.stamp;++telemetry_reads;
+            }while(!telemetry_done.load());
+        });
+        while(telemetry_ready.load()!=telemetry_readers.size())std::this_thread::yield();
+        stream(300);
+        telemetry_done=true;for(auto& reader:telemetry_readers)reader.join();
+        bool concurrent_telemetry=telemetry_ok&&telemetry_reads>0;
+        std::printf("TELEMETRY_CONCURRENT id=%s reads=%u pass=%d\n",id,telemetry_reads.load(),concurrent_telemetry);
+        ok=ok&&concurrent_telemetry;
+
         if(n.kind==TelemetryKind::DynamicEq)ok=ok&&std::abs(n.gain_db[0]+9)<.02;
         else if(n.kind==TelemetryKind::Dynamics)ok=ok&&n.gain_db[0]<-10;
         else if(n.kind==TelemetryKind::Multiband)ok=ok&&n.gain_db[1]<-10&&n.gain_db[0]==0&&n.gain_db[2]==0;

@@ -43,6 +43,7 @@ native-obs
 portable-discovery
 reactive-source
 realtime-handoff
+realtime-snapshot
 scan-process
 space
 space-obs

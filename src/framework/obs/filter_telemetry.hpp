@@ -3,18 +3,17 @@
 #include <obs-module.h>
 #include <util/platform.h>
 #include <atomic>
-#include <mutex>
+#include "framework/dsp/realtime_snapshot.hpp"
 #ifdef HYPERDSP_WITH_BUILDER
 #include "ui/filter_analysis.hpp"
 #endif
 namespace hyperdsp {
-// No reader ever holds the filter's processing mutex. Publication is
-// demand-driven and never waits for a reader; invalidation is lock-free.
+// Demand-driven, bounded snapshot publication without mutex acquisition.
+// Invalidation is atomic and readers never access mutable engine state.
 class FilterTelemetry {
     obs_source_t* source_=nullptr;
     std::atomic<uint64_t> request_{0},epoch_{1};
-    std::mutex snapshot_mutex_;
-    FilterTelemetryFrame published_{};
+    RealtimeSnapshot<FilterTelemetryFrame> published_;
     static void read_proc(void* ptr,calldata_t* data){
         auto* self=static_cast<FilterTelemetry*>(ptr);
         calldata_set_bool(data,"available",false);
@@ -24,10 +23,11 @@ class FilterTelemetry {
         if(frame.version!=1||frame.size!=sizeof(frame))return;
         if(!obs_source_enabled(self->source_)){self->invalidate();return;}
         auto now=os_gettime_ns();self->request_.store(now);
-        std::lock_guard lock(self->snapshot_mutex_);
-        const auto& v=self->published_;
-        if(!v.stamp||v.epoch!=self->epoch_.load()||now<v.stamp||now-v.stamp>500000000ULL)return;
-        frame=v;calldata_set_bool(data,"available",true);
+        bool available=self->published_.visit([&](const FilterTelemetryFrame& v){
+            if(!v.stamp||v.epoch!=self->epoch_.load()||now<v.stamp||now-v.stamp>500000000ULL)return false;
+            frame=v;return v.epoch==self->epoch_.load();
+        });
+        calldata_set_bool(data,"available",available);
     }
 #ifdef HYPERDSP_WITH_BUILDER
     static bool open(obs_properties_t*,obs_property_t*,void* ptr){
@@ -52,9 +52,9 @@ public:
         auto now=os_gettime_ns();
         if(now<request||now-request>1000000000ULL)return;
         if(epoch!=epoch_.load())return;
-        std::unique_lock lock(snapshot_mutex_,std::try_to_lock);
-        if(!lock.owns_lock())return;
-        published_.node=read();published_.rate=rate;published_.stamp=now;published_.epoch=epoch;
+        FilterTelemetryFrame frame;
+        frame.node=read();frame.rate=rate;frame.stamp=now;frame.epoch=epoch;
+        published_.publish(frame);
     }
     void add_button(obs_properties_t* p){
 #ifdef HYPERDSP_WITH_BUILDER
