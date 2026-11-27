@@ -101,6 +101,12 @@ class PreparedGraph {
         return id.size()==1&&ec==std::errc{}&&end==id.data()+id.size()&&value>=1&&value<=maximum;
     }
 public:
+    using ControlValues=Values;
+    // Only the audio owner applies a validated snapshot to mutable DSP.
+    ControlValues control_snapshot()const{return values_;}
+    void apply_validated_controls(const ControlValues& next){
+        if(next!=values_){values_=next;apply_effective();}
+    }
     unsigned latency()const{return latency_;}
     bool latency_known()const{return !unknown_latency_;}
     static std::unique_ptr<PreparedGraph> prepare(const GraphSpec& s,unsigned rate,unsigned channels,std::string& error,const std::vector<std::string>& allowed={},const Parameters& overrides={}){
@@ -386,7 +392,7 @@ public:
     bool set_controls(const Parameters& updates,std::string& error){
         error.clear();auto next=values_;
         if(!resolve_values(updates,next,error))return false;
-        if(next!=values_){values_=next;apply_effective();}
+        apply_validated_controls(next);
         return true;
     }
     void external_values(const std::array<float,modulation_slots>& values){modulation_.external_values(values);}

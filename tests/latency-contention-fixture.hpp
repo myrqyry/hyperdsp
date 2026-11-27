@@ -33,7 +33,7 @@ inline obs_audio_data* inspect(void* ptr,obs_audio_data* a){
 // Caller selects a full-dry, latency-aligned mode and constant unity trims.
 // Concurrent changes to an irrelevant parameter must not disturb any sample.
 inline bool verify(obs_source_t* source,obs_source_t* filter,obs_data_t* settings,
-                   unsigned delay,const char* key,double a,double b){
+                   unsigned delay,const char* key,double a,double b,bool inspect_properties=false){
     Probe probe{delay};active=&probe;
     obs_source_info info{.id="hyperdsp_latency_test_probe",.type=OBS_SOURCE_TYPE_FILTER,.output_flags=OBS_SOURCE_AUDIO,
         .get_name=name,.create=create,.destroy=destroy,.filter_audio=inspect};
@@ -42,11 +42,17 @@ inline bool verify(obs_source_t* source,obs_source_t* filter,obs_data_t* setting
     if(!watcher){active=nullptr;return false;}
     obs_source_filter_add(source,watcher);obs_source_filter_set_order(source,filter,OBS_ORDER_MOVE_TOP);
     std::atomic<bool> ready{false},stop{false};
-    unsigned updates=0;
+    unsigned updates=0,property_reads=0;bool metadata_ok=true;
     std::thread writer([&]{
         while(!stop.load()){
             obs_data_set_double(settings,key,updates%2?a:b);
             obs_source_update(filter,settings);++updates;ready=true;
+            if(inspect_properties&&updates%16==0){
+                auto* props=obs_source_properties(filter);
+                metadata_ok=metadata_ok&&props&&obs_properties_get(props,key);
+                if(props)obs_properties_destroy(props);
+                ++property_reads;
+            }
         }
     });
     while(!ready.load())std::this_thread::yield();
@@ -60,8 +66,8 @@ inline bool verify(obs_source_t* source,obs_source_t* filter,obs_data_t* setting
     }
     stop=true;writer.join();
     obs_source_filter_remove(source,watcher);obs_source_release(watcher);active=nullptr;
-    bool ok=updates>10&&probe.samples==uint64_t(blocks)*frames&&!probe.errors;
-    std::printf("LATENCY_CONTENTION delay=%u updates=%u samples=%llu errors=%llu pass=%d\n",delay,updates,
+    bool ok=updates>10&&probe.samples==uint64_t(blocks)*frames&&!probe.errors&&metadata_ok&&(!inspect_properties||property_reads>0);
+    std::printf("LATENCY_CONTENTION delay=%u updates=%u property_reads=%u samples=%llu errors=%llu pass=%d\n",delay,updates,property_reads,
         (unsigned long long)probe.samples,(unsigned long long)probe.errors,ok);
     return ok;
 }

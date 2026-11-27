@@ -39,7 +39,7 @@ class GraphMonitor {
     std::atomic<uint64_t> requested_{0},epoch_{1};
     std::mutex snapshot_mutex_;
     GraphMonitorFrameV3 published_{};
-    // Audio thread only, while the graph processing lock is held.
+    // Serialized audio callback only; control invalidates via the atomic epoch.
     GraphMonitorFrameV3 staging_{};
     std::array<float,monitor_samples> pending_{},pending_right_{};
     unsigned used_=0,take_=0;

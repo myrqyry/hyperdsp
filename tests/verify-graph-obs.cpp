@@ -14,6 +14,7 @@
 #include <thread>
 #include <array>
 #include "sound-signal-fixture.hpp"
+#include "latency-contention-fixture.hpp"
 #include "sight-signal-fixture.hpp"
 
 
@@ -174,6 +175,10 @@ int main(int argc,char**argv){
     }
     bool ok=reactive_ok&&presets_ok&&macro_ok&&external_ok&&mixed_ok&&controls&&std::abs(a[0]-.071046)<.002&&std::abs(a[1]/a[0]-.4)<.001&&b[0]<1e-5&&c[0]<1e-5&&d[0]<1e-5&&duplicate[0]<1e-5&&malformed[0]<1e-5&&std::abs(bypass[0]-.282843)<.002;
     std::printf("GRAPH_OBS serial=%g parallel=%g invalid=%g invalid_param=%g bypass=%g pass=%d\n",a[0],b[0],c[0],d[0],bypass[0],ok);
+    const char* latency_graph=R"({"schema":1,"nodes":[{"effect":"native:hyperdsp_spectral_filter:1","params":{"mix":0},"inputs":[{"source":-1,"weight":1}]}],"output":0,"controls":[{"id":"threshold","name":"Threshold","default":0.5,"bindings":[{"node":0,"parameter":"threshold","low":-50,"high":-30}]}]})";
+    obs_data_set_string(settings,"graph_json",latency_graph);obs_source_update(filter,settings);
+    bool continuous=latency_contention::verify(source,filter,settings,1024,"graph_control_threshold",0,1,true);
+    ok=ok&&continuous;
     obs_set_output_source(1,nullptr);obs_source_dec_active(source);obs_source_filter_remove(source,filter);
     obs_source_release(filter);obs_source_release(source);obs_data_release(settings);obs_shutdown();return ok?0:1;
 }
