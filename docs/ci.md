@@ -21,7 +21,7 @@ has 17 regular files. Modern layout tested using the OBS32 binary, not
 proof of OBS33 ABI/runtime support. Native hosted SDK qualification
 remains pending. Windows/macOS need a real portability pass for POSIX
 dynamic loading, scanner process lifecycle and dependencies; no nominal
-matrix coverage by disabling features. Private repository stays private.
+matrix coverage by disabling features. No visibility changes are performed by qualification.
 
 ## Host portability checkpoint
 
@@ -43,3 +43,26 @@ Both extracted 17-file Linux packages passed real LADSPA scanner and
 CLI checks. Full Linux regression subsequently passed all 56 named tests,
 with zero failures or skips. Both layouts used the OBS32.2.0 binary;
 this is not OBS33 ABI qualification.
+
+## Hosted OBS 33 regression (run 45919855507)
+
+OBS 32.2 passed 54/54; OBS 33.0.3 compiled and passed 52/54, with failures
+in the Effect Builder canvas and Spectral partition test. The Builder's
+custom cable press selected the cable, but its unmatched Qt base-class
+release could clear that selection. Paired event handling now preserves
+selection through release. The widget test chooses an exposed point on
+the intended wire, verifies actual selection and disconnect/reconnect,
+and exercises last-input rejection instead of relying on an unchanged
+JSON result when no cable was selected.
+
+The exact Spectral failure reproduced locally with GCC 15.2.0 at
+`-O3 -DNDEBUG -march=x86-64-v3`: Smear 44.1 kHz, first mismatch sample 1254,
+maximum absolute difference 6.23614e-6 (limit 1e-6). GCC15 baseline passed;
+contract-off, vectorization-off and no-inline experiments isolated a
+compiler-specialization/contraction difference. Keeping the FFT-hop body
+out of line restores identical block/scalar results, with no changes to
+algorithm, tolerance, FFT size or global optimization options. GCC15
+baseline/v3/native and GCC13/Clang18 native builds now report zero partition
+and latency-alignment error. The same native test logs the first mismatch
+and maxima if a future compiler regresses. Hosted OBS33 rerun is required
+for confirmation; this is not a new hardware or listening benchmark.
