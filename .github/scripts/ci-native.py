@@ -61,6 +61,26 @@ def stage(root, installed, stage_root, target, version):
     work = installed.parent
     build = work / 'build'
     env = runtime_env(work, target, version)
+    if target == 'windows-x64':
+        manifest = build / 'runtime-dlls-RelWithDebInfo.txt'
+        linked = [Path(line) for line in manifest.read_text().splitlines() if line.strip()]
+        module_dir = build / 'RelWithDebInfo'
+        if not linked:
+            raise ValueError('No linked runtime DLLs reported by CMake')
+        for dll in linked:
+            staged = module_dir / dll.name
+            if not staged.is_file() or sdk.digest(staged) != sdk.digest(dll):
+                raise ValueError(f'Wrong or missing test runtime DLL: {staged}')
+        print('Windows linked test runtime DLLs: ' + ', '.join(p.name for p in linked), flush=True)
+        # The package itself remains free of duplicated host SDK libraries.
+        env['PATH'] = str(module_dir) + os.pathsep + env['PATH']
+        # Test loading independently before running the full suite. Use a
+        # fresh Python process so already-loaded Qt cannot mask dependencies.
+        # LOAD_WITH_ALTERED_SEARCH_PATH includes the DLL directory and PATH,
+        # matching the search used by libobs rather than ctypes defaults.
+        sdk.run(sys.executable, '-c',
+                'import ctypes,sys; ctypes.WinDLL(sys.argv[1], winmode=8); print("HYPERDSP_DLL_LOAD_PASS", flush=True)',
+                module_dir / 'hyperdsp.dll', env=env)
     report = work / 'native.xml'
     sdk.run('ctest', '--test-dir', build, '-C', 'RelWithDebInfo', '--output-on-failure', '--no-tests=error', '--output-junit', report, env=env)
     sdk.run(sys.executable, root / 'tests/verify-ci-report.py', report, '59')

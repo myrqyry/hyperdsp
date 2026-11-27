@@ -111,6 +111,22 @@ if(HYPERDSP_BUILD_BENCHMARKS AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     endif()
 endif()
 include(CTest)
+# libobs loads the module dynamically. Unlike verify-builder, most test
+# executables don't import Qt or obs-frontend-api themselves. Place the
+# module's actual linked SDK runtime DLLs alongside the test executables
+# on Windows, where the application directory is in the DLL search order.
+# This is build-tree-only; installed packages must use the host OBS DLLs.
+if(BUILD_TESTING AND WIN32 AND HYPERDSP_NATIVE_SDK)
+    if(CMAKE_VERSION VERSION_LESS 3.21)
+        message(FATAL_ERROR "Windows native tests require CMake 3.21+ for runtime DLL staging")
+    endif()
+    add_custom_command(TARGET hyperdsp POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            $<TARGET_RUNTIME_DLLS:hyperdsp> "$<TARGET_FILE_DIR:hyperdsp>"
+        COMMAND_EXPAND_LISTS VERBATIM)
+    file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/runtime-dlls-$<CONFIG>.txt"
+        CONTENT "$<JOIN:$<TARGET_RUNTIME_DLLS:hyperdsp>,\n>\n")
+endif()
 if(BUILD_TESTING)
     add_executable(verify-realtime-handoff tests/verify-realtime-handoff.cpp)
     target_include_directories(verify-realtime-handoff PRIVATE src)

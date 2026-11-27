@@ -180,3 +180,26 @@ addressed without changing production code or removing assertions.
 Local CMake 4.2.3 portable-dependency build: 59/59 tests passed
 (38.59 s), exact JUnit inventory verified. Native CI must still
 confirm the fixes; this does not establish full Windows/macOS support.
+
+## Windows-only remaining qualification (2026-11-27)
+
+Run 46081948114 at 4788bdd passed both Linux and all four macOS
+legs, including package verification. Both Windows targets compiled
+and ran CTest (35/59 passed each). 23 tests failed to load the plugin
+with Windows error 126; the Builder test, which links the frontend
+and Widgets directly, passed. This points to dependency discovery in
+the dynamically loaded test process, not a reported DSP mismatch.
+Stage CMake-selected runtime DLLs beside the Windows build-tree test
+executables, verify their digests against the SDK, and perform a
+fresh-process DLL load preflight. Do not include these copies in the
+installed plugin package. The missing dependency itself has not yet
+been identified; native rerun must confirm the correction.
+
+The other Windows failure was the standalone native-filter test.
+Reproduced on Linux with a 1 MiB stack limit (exit 139): nested
+NativeFilter instances contain more than 1 MiB of comb delay storage.
+Allocate the test engines on the heap, as the production adapter
+already does. The same limited-stack test now passes, preserving all
+numerical and reset assertions. Full local portable dependency
+regression: 59/59 passed in 38.80 seconds, exact JUnit inventory
+verified. Windows-specific DLL staging and load preflight await CI.

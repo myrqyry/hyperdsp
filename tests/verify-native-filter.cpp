@@ -3,17 +3,18 @@
 #include <cmath>
 #include <cstdio>
 #include <limits>
+#include <memory>
 using namespace hyperdsp;
 constexpr unsigned sr=48000;
 constexpr double pi=3.141592653589793;
 static double response(FilterSettings s,double hz){
-    NativeFilter engine;engine.reset(sr,s);
+    auto engine=std::make_unique<NativeFilter>();engine->reset(sr,s);
     double sum=0,ref=0;
     for(unsigned i=0;i<sr;i++){
         float x=float(.2*std::sin(2*pi*hz*i/sr));
         float y=x;
         float* channels[]={&y};
-        engine.process(channels,1,1);
+        engine->process(channels,1,1);
         if(i>=sr/2){sum+=double(y)*y;ref+=double(x)*x;}
     }
     return std::sqrt(sum/ref);
@@ -54,7 +55,7 @@ int main(){
     FilterSettings old;old.stages=4;
     ok=ok&&std::abs(response(old,1000)-.25)<.0001;
     // Channel independence, finite bounded settings, live modulation.
-    NativeFilter f;s=FilterSettings{};s.mode=FilterMode::LowPass;s.frequency=1000;
+    auto storage=std::make_unique<NativeFilter>();auto& f=*storage;s=FilterSettings{};s.mode=FilterMode::LowPass;s.frequency=1000;
     f.reset(sr,s);
     std::array<float,480> l{},r{};l[0]=1;
     float* ch[]={l.data(),r.data()};f.process(ch,2,l.size());
