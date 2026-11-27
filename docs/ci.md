@@ -40,4 +40,6 @@ the only enabled profile. HyperDSP run 45917243129 was budget-blocked
 before compilation. No change to repo visibility or billing.
 
 Both extracted 17-file Linux packages passed real LADSPA scanner and
-CLI checks. Full regression report not yet available at checkpoint.
+CLI checks. Full Linux regression subsequently passed all 56 named tests,
+with zero failures or skips. Both layouts used the OBS32.2.0 binary;
+this is not OBS33 ABI qualification.
