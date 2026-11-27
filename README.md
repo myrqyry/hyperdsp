@@ -15,6 +15,11 @@ Both deterministic effect plugins may optionally consume data published by eithe
 
 The first verified target is the microphone coloration filter: dynamic, condenser, ribbon, telephone, vintage radio, tape and dry bypass, with spectral sweep and resonance controls. These are procedural tones, not measured microphone reproductions.
 
+Native Windows x64 and macOS (Intel/Apple Silicon) are now being qualified
+against OBS 32 and 33 in the same shared CI matrix. The native build retains
+LADSPA hosting, Clock Sync and the Qt Effect Builder; native device playback
+for the isolated audition panel remains outstanding. See [CI qualification](docs/ci.md).
+
 ## Build and test (Linux)
 
 Requires a C++20 compiler, CMake, OBS development headers, libobs, Jansson development headers/library, and LADSPA SDK headers (on Mint: libjansson-dev and ladspa-sdk; Clock Sync also uses libsamplerate0-dev). Run `tests/verify.sh` for a fresh Debug build and the configured CTest suite, including numerical DSP checks and real libobs audio capture. Qt widget tests require the Effect Builder dependencies and Qt 6 Test; LADSPA integration and CLI fixture tests require the SDK `amp.so` test plugin and Python 3. No model, download, physical audio device or neural dependency is needed.

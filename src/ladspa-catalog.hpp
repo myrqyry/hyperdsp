@@ -26,7 +26,11 @@ inline std::string lower(std::string text){
     return text;
 }
 inline std::string catalog_path(){
+#ifdef _WIN32
+    if(const wchar_t* path=_wgetenv(L"HYPERDSP_CATALOG"))return platform::utf8_path(std::filesystem::path(path));
+#else
     if(const char* path=std::getenv("HYPERDSP_CATALOG"))return path;
+#endif
     char* config=obs_module_config_path("ladspa-catalog.json");
     std::string result=config?config:"";bfree(config);return result;
 }
@@ -74,6 +78,9 @@ inline Catalog read_catalog(const std::string& path){
                     e.controls_complete=valid&&obs_data_get_bool(item,"controls_complete");
                     obs_data_array_release(controls);
                 }
+#ifdef _WIN32
+                std::replace(e.path.begin(),e.path.end(),'\\','/');
+#endif
                 if(platform::absolute_library_path(e.path)&&!e.label.empty()&&!e.name.empty()&&
                     e.path.find('\t')==std::string::npos&&e.label.find('\t')==std::string::npos&&
                     (e.channels==1||e.channels==2))entries.push_back(std::move(e));

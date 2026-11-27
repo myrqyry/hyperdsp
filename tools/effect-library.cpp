@@ -7,15 +7,27 @@
 using namespace hyperdsp;
 namespace {
 std::string default_catalog(){
+#if defined(_WIN32)
+    if(const wchar_t* override_path=_wgetenv(L"HYPERDSP_CATALOG"))return platform::utf8_path(std::filesystem::path(override_path));
+#else
     if(const char* override_path=std::getenv("HYPERDSP_CATALOG"))return override_path;
+#endif
+#if defined(_WIN32)
+    if(const wchar_t* config=_wgetenv(L"APPDATA");config&&*config)
+        return platform::utf8_path(std::filesystem::path(config)/"obs-studio/plugin_config/hyperdsp/ladspa-catalog.json");
+#elif defined(__APPLE__)
+    if(const char* home=std::getenv("HOME");home&&*home)
+        return std::string(home)+"/Library/Application Support/obs-studio/plugin_config/hyperdsp/ladspa-catalog.json";
+#else
     if(const char* config=std::getenv("XDG_CONFIG_HOME");config&&*config)
         return std::string(config)+"/obs-studio/plugin_config/hyperdsp/ladspa-catalog.json";
     if(const char* home=std::getenv("HOME");home&&*home)
         return std::string(home)+"/.config/obs-studio/plugin_config/hyperdsp/ladspa-catalog.json";
+#endif
     return {};
 }
 }
-int main(int argc,char** argv){
+static int run_cli(int argc,char** argv){
     std::string path=default_catalog(),query,format;
     unsigned channels=2,rate=48000;
     bool json=false;
@@ -66,4 +78,16 @@ int main(int argc,char** argv){
     obs_data_array_push_back(utilities,gain);obs_data_release(gain);
     obs_data_set_array(root,"graph_utilities",utilities);obs_data_array_release(utilities);
     std::cout<<obs_data_get_json(root)<<"\n";obs_data_release(root);
+    return 0;
 }
+
+#ifdef _WIN32
+int wmain(int argc,wchar_t** argv){
+    std::vector<std::string> values;values.reserve(argc);
+    for(int i=0;i<argc;++i)values.push_back(hyperdsp::platform::utf8_path(std::filesystem::path(argv[i])));
+    std::vector<char*> args;args.reserve(values.size());for(auto& v:values)args.push_back(v.data());
+    return run_cli(argc,args.data());
+}
+#else
+int main(int argc,char** argv){return run_cli(argc,argv);}
+#endif

@@ -66,3 +66,49 @@ baseline/v3/native and GCC13/Clang18 native builds now report zero partition
 and latency-alignment error. The same native test logs the first mismatch
 and maxima if a future compiler regresses. Hosted OBS33 rerun is required
 for confirmation; this is not a new hardware or listening benchmark.
+
+## Native matrix pilot
+
+The hosted Linux rerun at bcbb632 (run 45942590209) passed both OBS
+32.2.0 and OBS 33.0.3 with the complete 56-test inventory. The native
+Windows x64, macOS Intel, and macOS arm64 caller now uses shared CI
+engine e9eb704 and the pinned native libobs/frontend imported targets.
+The existing Linux recipe and artifact policy remain unchanged.
+
+Native dependency source archives are SHA-256 pinned in
+`.github/scripts/ci-native.py`: Jansson 2.14.1 (MIT), libsamplerate
+0.2.2 (BSD), LADSPA SDK 1.17 (LGPL API header). The first two are built
+statically and notices are staged. No unrelated plugin runtime libraries
+are copied. The native fixture is a test-only amplifier implementing the
+SDK example port contract, built for the target architecture and excluded
+from the package. All 56 HyperDSP cases are required on each native leg;
+no dependency self-tests or skipped required project cases are permitted.
+The native hook also tests the staged module's catalog callback and actual
+installed probe/scanner/CLI, verifies notice and preset hashes, checks the
+package inventory and creates the correct Windows layout or macOS bundle.
+The SDK and runtime test paths are isolated. Python 3 remains a required
+external scanner dependency. The standalone CLI requires the matching OBS
+runtime to be discoverable by the system loader.
+
+Manual portable dependency build: unpack the three pinned source archives
+into a user-owned directory with their original top-level directory names,
+then configure with `-DHYPERDSP_PORTABLE_DEPS=ON`,
+`-DHYPERDSP_DEPS_ROOT=/path/to/deps`, `-DHYPERDSP_NATIVE_FIXTURE=ON`,
+`-DHYPERDSP_REQUIRE_BUILDER=ON`, `-DBUILD_TESTING=ON`.
+On Windows/macOS also use `-DHYPERDSP_NATIVE_SDK=ON` and configure the
+matching OBS libobs/frontend and Qt6 SDK locations through CMake.
+Native qualification requires actual hosted results, not just CMake
+configuration. A/B isolated audition rendering is retained; audible output
+selection/playback on Windows and macOS is still unimplemented (Linux
+PulseAudio/PipeWire tools remain unchanged). No native audio device or
+physical listening claims are made by the CI suite.
+
+Local portable source-dependency qualification: all 56 project cases in
+the first run passed (13 dependency self-tests were inadvertently registered
+but not built; corrected the CMake cache scope and independently verified
+the exact 56-name registration). Native imported SDK configuration also
+registered exactly 56 cases against the local OBS SDK. The 20-file staged
+Linux package passed actual libobs catalog callback, probe/scan, CLI and
+Unicode-path discovery. The first staged CLI run exposed a missing return
+when extracting the common entry point; explicit return and rerun passed.
+These are same-host Linux results, not Windows/macOS runtime confirmation.
