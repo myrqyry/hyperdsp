@@ -80,3 +80,38 @@ Final two strict glibc-audited runs: 64,000 measured callbacks each, **128,000 c
 An earlier expanded 120-frame run had one graph callback of 2.810 ms wall time with 0.268 ms of thread CPU time (below its 2.5 ms budget). The graph workload also failed the fixture's original arbitrary total-energy threshold (>1); its measured nonzero energy was 0.646, so the threshold was corrected to >1e-6, while retaining the sample equality and changed-output checks. The prior wall-time overrun is still relevant; elapsed minus thread CPU is consistent with scheduling interruption but does not establish its exact cause. Spectral processing is hop-based: 120-frame median was much lower than p99 because only some packets execute the FFT. Do not mistake the median for peak computation cost.
 
 These results are warm steady-state, selected modes, stereo only, no effect topology changes, no physical audio devices and no end-to-end OBS deadline guarantee. Next cover first packets, topology changes, simultaneous sources, layouts/rates, paced playback with realistic UI edits, more representative LADSPA plugins and cross-platform qualification.
+
+## Cold, structural and multichannel coverage, 2026-11-27
+
+Additional options:
+
+- `--cold`: measure from the very first audio callback (no warmup), including initial prepared-engine adoption; retain the no-op concurrent writer.
+- `--transitions`: implies cold; alternate two configurations every 250 packets, seven changes per phase. The reference phase applies updates inline between audio submissions; the handoff phase applies the identical schedule from a separate control thread, acknowledged before the next submission. This isolates callback adoption from control preparation time and avoids comparing different coalesced update schedules. It is not a claim that engine replacements are gapless.
+- `--rate 48000|96000`, `--channels 1|2|6|8`: choose the OBS mono, stereo, 5.1 or 7.1 layout. Compare every channel against its reference and use distinct signed channel scales. Stereo's documented non-stereo bypass is explicitly required to be dry. For non-stereo layouts the SDK mono LADSPA amplifier is instantiated per channel, rather than treating unsupported stereo LADSPA as an active effect.
+
+Structural changes include mode/bypass transitions, Color 4x/1x oversampling, echo/ping-pong, reverb/allpass, native stages/mode, transient mode, graph replacement, Clock Sync medium/best quality, and stereo-to-mono LADSPA replacement (stereo layout) or per-channel mono gain change. The two phase outputs must agree; the dry segments of applicable effects must also equal the original input. SDK amplifier output is checked independently against the exact expected gain (.25/.5), and every cold or structural Clock Sync start must re-prime, with its first output timestamp anchored to the first input timestamp of that segment. Clock Sync timestamps are continuous **within** each engine epoch, not necessarily across a reset. Other active-to-active changes use deterministic waveform comparison rather than independent mathematical verification of all modes.
+
+```sh
+audit="$PWD/build/hyperdsp-benchmark-allocations.so"
+# Invoke only the benchmark with the preload, not the normal OBS application.
+LD_PRELOAD="$audit" build/hyperdsp-benchmark-audio "$PWD/build/hyperdsp.so" "$PWD" --frames 120 --cold --telemetry --ladspa /usr/lib/ladspa/amp.so
+for ch in 1 2 6 8; do
+  rate=48000; if [ "$ch" -ge 6 ]; then rate=96000; fi
+  LD_PRELOAD="$audit" build/hyperdsp-benchmark-audio "$PWD/build/hyperdsp.so" "$PWD" --frames 120 --rate "$rate" --channels "$ch" --transitions --telemetry --ladspa /usr/lib/ladspa/amp.so
+done
+```
+
+The final six strict runs used the same Linux Release module (0c7d0ea); each measured 64,000 callbacks. The last run repeated the warm steady-state matrix to preserve compatibility with the previous benchmark. All six passed waveform/timestamp checks and observed zero allocator/free calls, including the first callback and structural adoption boundaries. Four structural runs covered 896 scheduled configuration changes (16 workloads x 2 phases x 7 changes x 4 layouts).
+
+| Workload | Budget (us) | Largest p99 across phases (us) | Largest wall time (us) | Wall overruns | Thread CPU overruns |
+|---|---:|---:|---:|---:|---:|
+| 48 kHz stereo warm | 2,500 | 273.86 | 2,576.09 | 1 | 0 |
+| 48 kHz stereo cold | 2,500 | 269.56 | 842.06 | 0 | 0 |
+| 48 kHz mono structural | 2,500 | 137.25 | 3,697.97 | 1 | 0 |
+| 48 kHz stereo structural | 2,500 | 269.58 | 1,459.83 | 0 | 0 |
+| 96 kHz 5.1 structural | 1,250 | 799.94 | 5,968.34 | 12 | 0 |
+| 96 kHz 7.1 structural | 1,250 | 1,077.00 | 2,642.08 | 17 | 0 |
+
+Total: 384,000 callbacks, 31 wall-time budget overruns, zero measured thread-CPU budget overruns. Prior exploratory runs also showed occasional wall overruns. The elapsed/CPU distinction is consistent with scheduling interruptions, but not a trace of their exact cause. Largest initial cold callback in the final stereo cold run: 42.94 us (Color). Largest structural-boundary callback, including initial adoption: 170.23 us (Color, 7.1); zero allocation/free calls across all measured boundaries. On the 7.1 workload, the three-effect graph's p99 reached 86% of its 1.25 ms budget and averaged about 19% of the audio-thread CPU budget while alternating active and dry graph topologies. The spectral FFT hop is the principal measured workload to profile next; the average does not describe peak cost.
+
+Still unqualified: multiple simultaneous audio sources, sustained paced workload, real-time scheduler traces, live rate/layout changes inside one instance (these layouts were separate processes), other LADSPA plugins, and cross-platform/desktop device behavior. This is a test-only change, not an optimization or a claim of end-to-end hard real-time safety.
