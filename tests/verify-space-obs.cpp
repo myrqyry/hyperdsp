@@ -12,6 +12,7 @@
 #include <thread>
 #include <array>
 #include "sound-signal-fixture.hpp"
+#include "history-contention-fixture.hpp"
 
 
 struct Stats {
@@ -112,5 +113,10 @@ int main(int argc,char**argv){
         reverb[0]>.01&&reverb[0]<1&&reverb[1]>.01&&std::abs(bypass[0]-.282843)<.003&&reactive[0]<.003&&std::abs(fallback[0]-bypass[0])<.004;
     std::printf("SPACE_OBS notch=%g allpass=%g reverb=%g,%g bypass=%g reactive=%g fallback=%g pass=%d\n",notch[0],allpass[0],reverb[0],reverb[1],bypass[0],reactive[0],fallback[0],ok);
     obs_set_output_source(1,nullptr);obs_source_dec_active(source);obs_source_filter_remove(source,filter);
+    auto* history=obs_data_create();
+    obs_data_set_int(history,"mode",2);obs_data_set_double(history,"mix",1);
+    obs_data_set_double(history,"decay",1.2);
+    bool continuous=history_contention::verify(source,"hyperdsp_space_filter",history,"center",400,1600);
+    obs_data_release(history);ok=ok&&continuous;
     obs_source_release(filter);obs_source_release(source);obs_data_release(settings);obs_shutdown();return ok?0:1;
 }

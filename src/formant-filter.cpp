@@ -3,15 +3,12 @@
 #include <obs-module.h>
 #include "framework/dsp/formant.hpp"
 #include "framework/obs/route_properties.hpp"
-#include <memory>
-#include <mutex>
+#include "framework/obs/realtime_settings.hpp"
 namespace {
 using namespace hyperdsp;
 struct Source {
-    std::mutex mutex;
-    Formant engine;
-    ExternalInputs external;
-    unsigned rate=0,channels=0;
+    RealtimeSettings<FormantSettings,Formant> parameters;
+    uint64_t generation=0;
 };
 FormantSettings read(obs_data_t* s){
     FormantSettings f;
@@ -32,12 +29,13 @@ void defaults(obs_data_t* s){
 void update(void* ptr,obs_data_t* s){
     auto* f=static_cast<Source*>(ptr);if(!f)return;
     auto settings=read(s);obs_audio_info ai{};if(!obs_get_audio_info(&ai))return;
-    std::lock_guard lock(f->mutex);
-    for(unsigned i=0;i<modulation_slots;++i)obs_routes::connect(f->external,s,i,settings.routes[i].source);
-    auto channels=get_audio_channels(ai.speakers);
-    if(f->rate!=ai.samples_per_sec||f->channels!=channels){
-        f->rate=ai.samples_per_sec;f->channels=channels;f->engine.reset(f->rate,settings);
-    }else f->engine.set(settings);
+    const auto channels=get_audio_channels(ai.speakers);
+    if(ai.samples_per_sec<8000||ai.samples_per_sec>192000||!channels||channels>MAX_AUDIO_CHANNELS)return;
+    try{
+        f->parameters.publish(settings,s,ai.samples_per_sec,channels,[](Formant& engine,unsigned rate,unsigned,const FormantSettings& settings){
+            engine.reset(rate,settings);
+        });
+    }catch(const std::exception& e){blog(LOG_WARNING,"[HyperDSP Formant] Settings preparation failed: %s",e.what());}
 }
 void* create(obs_data_t* s,obs_source_t*){auto f=std::make_unique<Source>();update(f.get(),s);return f.release();}
 void destroy(void* p){delete static_cast<Source*>(p);}
@@ -73,12 +71,14 @@ obs_properties_t* properties(void*){
 }
 obs_audio_data* process(void* p,obs_audio_data* audio){
     auto* f=static_cast<Source*>(p);if(!f||!audio)return audio;
-    std::unique_lock lock(f->mutex,std::try_to_lock);if(!lock.owns_lock())return audio;
-    obs_audio_info ai{};if(!obs_get_audio_info(&ai)||ai.samples_per_sec!=f->rate||
-        f->rate<8000||f->rate>192000||get_audio_channels(ai.speakers)!=f->channels||f->channels>MAX_AUDIO_CHANNELS)return audio;
+    auto* state=f->parameters.consume();
+    obs_audio_info ai{};if(!state||!obs_get_audio_info(&ai)||ai.samples_per_sec!=state->rate||
+        get_audio_channels(ai.speakers)!=state->channels)return audio;
+    auto& engine=*state->engine;
+    if(state->generation!=f->generation){engine.set(state->settings);f->generation=state->generation;}
     std::array<float*,MAX_AUDIO_CHANNELS> buffers{};
-    for(unsigned c=0;c<f->channels;++c)buffers[c]=reinterpret_cast<float*>(audio->data[c]);
-    f->engine.external_values(f->external.snapshot());f->engine.process(buffers.data(),f->channels,audio->frames);
+    for(unsigned c=0;c<state->channels;++c)buffers[c]=reinterpret_cast<float*>(audio->data[c]);
+    engine.external_values(state->external.snapshot());engine.process(buffers.data(),state->channels,audio->frames);
     return audio;
 }
 }
