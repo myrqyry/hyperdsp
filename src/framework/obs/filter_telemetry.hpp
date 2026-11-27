@@ -43,12 +43,15 @@ public:
         proc_handler_add(obs_source_get_proc_handler(source),"void hyperdsp_filter_telemetry_v1(in ptr frame, out bool available)",read_proc,this);
     }
     void invalidate(){epoch_.fetch_add(1);}
+    uint64_t epoch()const{return epoch_.load();}
     template<class ReadNode>
-    void publish(unsigned rate,ReadNode read){
+    void publish(unsigned rate,ReadNode read){publish(rate,read,epoch());}
+    template<class ReadNode>
+    void publish(unsigned rate,ReadNode read,uint64_t epoch){
         auto request=request_.load();if(!request)return;
         auto now=os_gettime_ns();
         if(now<request||now-request>1000000000ULL)return;
-        auto epoch=epoch_.load();
+        if(epoch!=epoch_.load())return;
         std::unique_lock lock(snapshot_mutex_,std::try_to_lock);
         if(!lock.owns_lock())return;
         published_.node=read();published_.rate=rate;published_.stamp=now;published_.epoch=epoch;
