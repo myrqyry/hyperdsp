@@ -29,11 +29,17 @@ std::string CatalogScan::start(){
     const char* binary=obs_get_module_binary_path(obs_current_module());
     if(!binary)return state="Scanner location unavailable.";
     const fs::path base=fs::path(binary).parent_path();
-    // Build tree has the copied script and probe next to the module.
-    // Installed tree uses plugin-root/tools.
-    fs::path tools=base;
+    // Build tree: adjacent tools. OBS33: module-root/tools.
+    // Legacy OBS: plugin-root/bin/64bit/module.so and plugin-root/tools.
     std::error_code ec;
-    if(!fs::is_regular_file(tools/"scan-ladspa.py",ec))tools=base.parent_path().parent_path()/"tools";
+    const auto complete=[&](const fs::path& dir){
+        return fs::is_regular_file(dir/"scan-ladspa.py",ec)&&
+               fs::is_regular_file(dir/"hyperdsp-ladspa-probe",ec);
+    };
+    fs::path tools=base;
+    if(!complete(tools))tools=base/"tools";
+    if(!complete(tools)&&base.filename()=="64bit"&&base.parent_path().filename()=="bin")
+        tools=base.parent_path().parent_path()/"tools";
     const auto script=(tools/"scan-ladspa.py").string(),probe=(tools/"hyperdsp-ladspa-probe").string();
     auto output=catalog_path();
     if(output.empty()||!fs::is_regular_file(script,ec)||!fs::is_regular_file(probe,ec))

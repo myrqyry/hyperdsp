@@ -21,6 +21,20 @@ Requires a C++20 compiler, CMake, OBS development headers, libobs, Jansson devel
 
 On a headless Linux host with Xvfb available, run `xvfb-run -a tests/verify.sh` to provide a display for libobs.
 
+### Shared CI packages
+
+[Shared OBS plugin CI](.github/workflows/ci.yml) targets Linux x86-64
+with pinned OBS 32.2.0 and 33.0.3 SDKs. All 54 configured tests, including
+Qt Effect Builder, Clock Sync, real libobs audio and LADSPA discovery,
+are required. The versioned packages contain the plugin, all 11 graph
+presets, licensing and the installed effect-library/scanner tools.
+The CI tests the extracted package as well as the build tree.
+OBS32 uses `bin/64bit/hyperdsp.so`; OBS33 uses `hyperdsp.so` at the
+plugin root. For local CMake installs, choose
+`-DHYPERDSP_PACKAGE_LAYOUT=legacy` (default) or `modern` for the
+matching target SDK. Do not install two versions together.
+Windows/macOS are not yet qualified. See [CI qualification](docs/ci.md).
+
 ## Clock Sync
 
 **HyperDSP Clock Sync** is a standalone adaptive sample-rate filter for live hardware/network capture. It compensates small clock-rate differences before other DSP and neural filters; it is not a graph node because it changes packet length and timestamps. Choose source timestamps (default) or OBS arrival time, fast/medium/best sinc quality and a correction limit of 50–2000 ppm. Refresh diagnostics in the native OBS properties to read lock state, estimated correction, applied ratio, timing error and relocks.
