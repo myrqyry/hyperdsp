@@ -1,3 +1,4 @@
+#include "history-contention-fixture.hpp"
 #include <obs-module.h>
 #include <util/platform.h>
 #include <array>
@@ -63,5 +64,9 @@ int main(int argc,char** argv){
     settings=obs_source_get_settings(graph);obs_data_set_double(settings,"graph_control_bass",0);obs_source_update(graph,settings);obs_data_release(settings);
     double uncompressed=stream(80);ok=ok&&std::abs(uncompressed-.353553)<.003;
     std::printf("MULTIBAND_OBS low=%g high=%g bypass=%g graph=%g macro_off=%g pass=%d\n",low,high,bypass,graphLow,uncompressed,ok);
-    obs_source_filter_remove(source,graph);obs_source_filter_remove(source,watcher);obs_source_release(graph);obs_source_release(watcher);obs_source_release(source);obs_shutdown();return ok?0:1;
+    obs_source_filter_remove(source,graph);obs_source_filter_remove(source,watcher);obs_source_release(graph);obs_source_release(watcher);auto* history=obs_data_create();
+    obs_data_set_int(history,"mode",1);obs_data_set_double(history,"low_threshold",-40);obs_data_set_double(history,"low_ratio",8);
+    bool continuous=history_contention::verify(source,"hyperdsp_multiband_filter",history,"unused_test_control",0,1);
+    obs_data_release(history);ok=ok&&continuous;
+    obs_source_release(source);obs_shutdown();return ok?0:1;
 }

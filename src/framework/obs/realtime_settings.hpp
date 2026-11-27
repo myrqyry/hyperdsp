@@ -5,7 +5,7 @@
 #include <type_traits>
 
 namespace hyperdsp {
-// Routed settings and subscriptions are prepared together on the control
+// Settings and optional routed subscriptions are prepared together on the control
 // path. The DSP engine itself remains audio-owned, so ordinary updates
 // preserve filter, envelope, delay, modulation and ramp history.
 template<class Settings,class Engine=void> class RealtimeSettings {
@@ -35,7 +35,8 @@ public:
     void publish(Settings settings,obs_data_t* data,unsigned rate,unsigned channels,Prepare prepare){
         std::lock_guard lock(control_);
         auto next=std::make_unique<Packet>(Packet{settings,accepted_,rate,channels,generation_.load()+1,accepted_engine_});
-        for(unsigned i=0;i<modulation_slots;++i)obs_routes::connect(next->external,data,i,settings.routes[i].source);
+        if constexpr(requires {settings.routes;})
+            for(unsigned i=0;i<modulation_slots;++i)obs_routes::connect(next->external,data,i,settings.routes[i].source);
         if constexpr(!std::is_void_v<Engine>){
             if(!next->engine||accepted_rate_!=rate||accepted_channels_!=channels){
                 auto engine=std::make_shared<Engine>();

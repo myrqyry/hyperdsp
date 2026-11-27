@@ -11,3 +11,5 @@ The crossover and phase-matched chunk processor now reside in the shared three_b
 Graph Monitor Node activity now displays independent held detector peaks and smoothed gain reduction for all three compressor bands; these are not output RMS meters. Standalone properties now offer Open live analysis with the same detector and reduction meters.
 
 The standalone Open live analysis window also provides draggable crossover boundaries (preview while dragging, apply on release) and per-band threshold, ratio and makeup controls. See [standalone analysis](filter-analysis.md).
+
+The standalone OBS adapter publishes fixed-size settings snapshots on the control path and adopts them at audio block boundaries. Ordinary parameter updates preserve the existing detector, filter and ramp histories, without a processing mutex or contention-induced dry fallback. Explicit bypass/mode/crossover changes retain their documented reset behavior. Telemetry is invalidated on accepted updates and is published only for the currently adopted generation; telemetry snapshot contention can skip a display update, not audio processing.

@@ -1,3 +1,4 @@
+#include "history-contention-fixture.hpp"
 #include <obs-module.h>
 #include <util/platform.h>
 #include <array>
@@ -59,5 +60,9 @@ int main(int argc,char** argv){
     s=obs_source_get_settings(graph);obs_data_set_double(s,"graph_control_punch",0);obs_source_update(graph,s);obs_data_release(s);
     auto c=stream();ok=ok&&c.onset<.06&&c.tail>.08&&c.linked;
     std::printf("TRANSIENT_OBS_PASS=%d onset=%g tail=%g steady=%g graph=%g softened=%g frames=%u\n",ok,a.onset,a.tail,a.steady,b.onset,c.onset,a.frames);
-    obs_source_filter_remove(source,graph);obs_source_filter_remove(source,watcher);obs_source_release(graph);obs_source_release(watcher);obs_source_release(source);obs_shutdown();return ok?0:1;
+    obs_source_filter_remove(source,graph);obs_source_filter_remove(source,watcher);obs_source_release(graph);obs_source_release(watcher);auto* history=obs_data_create();
+    obs_data_set_int(history,"mode",1);obs_data_set_double(history,"attack_db",12);obs_data_set_double(history,"sustain_db",12);
+    bool continuous=history_contention::verify(source,"hyperdsp_transient_filter",history,"low_attack_db",0,12);
+    obs_data_release(history);ok=ok&&continuous;
+    obs_source_release(source);obs_shutdown();return ok?0:1;
 }
