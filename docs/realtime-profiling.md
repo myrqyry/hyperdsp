@@ -173,3 +173,18 @@ Final runs on Ryzen 7 7700/Linux Mint, Release, glibc allocation audit:
 | optimized spectral gate, 96 kHz 7.1, 120 | 8 | 1250 | 74.121 | 1005.92 | 65 | 128 | 2357 |
 
 All five runs passed the strict output and allocation checks; 56,000 paced measured callbacks on the optimized module and 16,000 on the pre-FFT module. The eight-source stereo run covered 20 seconds of measured audio per source, 160 source-seconds. The surround A/B reduced combined callback CPU by approximately 64.7%; scheduling misses remain significant in the deliberately synchronized 1.25 ms case. These are single-run observations, not statistical estimates of underrun probability. The initial exploratory runs reused OBS source timestamp state; the final measurements recreate sources for each phase to avoid host timestamp discontinuities. Future work: real mixed output capture, realistic staggered sources, scheduler tracing where permitted, and native platform qualification. Do not interpret BENCH_PASS as a deadline guarantee.
+
+## Actual mixed-output capture, 2026-11-27
+
+The opt-in Linux `hyperdsp-benchmark-mix` target creates an isolated libobs video canvas (a matching OpenGL module is required) and routes four real stereo sources through spectral unity-reconstruction plus -6 dB gain graphs. The sources carry distinct integer-bin tones at 375, 750, 1125 and 1500 Hz. Track 1 receives all four; tracks 2 and 3 receive alternating pairs. Producers submit 480-frame packets at 48 kHz with 60 ms capture lead, for five seconds. The control thread alternates a graph threshold macro at 10 Hz (range zero means the output should remain unchanged), verifying both actual applied values using the graph V3 monitor on every source. No physical devices, encoder, running OBS scene collection, or live configuration are accessed.
+
+```sh
+cmake -S . -B build -DHYPERDSP_BUILD_BENCHMARKS=ON
+cmake --build build --target hyperdsp-benchmark-mix
+# Use the graphics module from the SAME OBS build as the linked libobs.
+xvfb-run -a build/hyperdsp-benchmark-mix "$PWD/build/hyperdsp.so" "$PWD" /path/to/libobs-opengl.so
+```
+
+The test captures actual `audio_output_connect` callbacks from OBS's mixer on three tracks, not source-level callbacks. Buffers are reserved before connecting; analysis is performed after disconnecting. It checks timestamps of the 1024-frame mix blocks, presence of all three tracks at each timestamp, expected per-track tone amplitudes, block-to-block phase consistency, residual beyond the expected tones, stereo ratio, and track 1 = track 2 + track 3. The 500 ms start/end regions are excluded for priming and draining. No allocator instrumentation or hard deadline assertion is made in this fixture.
+
+Two strengthened runs passed with 187 contiguous blocks / 191,488 stereo sample frames per track, zero errors, missing or invalid packets, all four controls observed in both states, 51 updates per source, maximum tone amplitude error approximately 4e-9 and residual approximately 3.14e-8. A deliberate wrong-route run (append `--negative-routing`) returns nonzero and reported 374 amplitude violations while the all-track sum still matched. This proves the track-specific assertions catch a misroute even when the combined signal remains correct. Reproducible Linux evidence with an isolated Xvfb display; physical audio-device output, encoded output, actual desktop scene/monitoring behavior, cross-platform graphics support and scheduling at lower capture buffering remain separate qualification tasks. This target is opt-in rather than required CTest because it needs a matching graphics module and display.
