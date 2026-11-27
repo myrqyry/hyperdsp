@@ -149,3 +149,27 @@ int main(){
 For production-path A/B, save the previous module before rebuilding and alternate invocations for the two modules, using `--frames 120 --rate 96000 --channels 8 --telemetry --case spectral_gate` and `--case graph_chain` with the allocator audit described above.
 
 New independent double-precision direct-DFT test covers forward/inverse/round-trip at 2, 4, 8, 32 and 1024 points, impulse/DC/tone/random/low-level inputs. For the 1024-point case the maximum forward absolute error was 2.13073e-5 and inverse 2.08079e-8 on both implementations with the baseline compiler flags. GCC 13 x86-64-v3 builds of FFT and spectral core tests pass, including zero observed partition error; this does not substitute for GCC 15 or native Windows/macOS qualification. The isolated preview also passed on a 512 KiB Linux process stack after moving its large workspace off-stack (the pre-change candidate crashed under that limit).
+
+## Paced simultaneous-source qualification, 2026-11-27
+
+The opt-in benchmark now accepts `--sources 2|4|8` with `--case graph_chain` or `--case spectral_gate`. Each source has a separate real OBS source/filter instance, a distinct deterministic input, an independently rendered unpaced reference, and a dedicated producer thread. The paced phase uses fresh OBS sources and filters, aligned absolute release times, 100 warmup packets and 2,000 measured packets per source. One control thread polls available telemetry at 20 Hz and applies a no-op settings update at 10 Hz. All producer-owned buffers and counters are separate; the callback instrumentation uses a thread-local probe. No change to production DSP.
+
+```sh
+LD_PRELOAD="$PWD/build/hyperdsp-benchmark-allocations.so" \
+  build/hyperdsp-benchmark-audio "$PWD/build/hyperdsp.so" "$PWD" \
+  --case graph_chain --sources 8 --channels 8 --rate 96000 --frames 120 --telemetry
+```
+
+The callback timing excludes host routing and fixture comparison. Host submission timing includes the full synchronous obs_source_output_audio call and callback instrumentation/comparison. Wake lateness measures actual submission start relative to the absolute packet release; completion lateness measures submission return relative to that release. Deadline misses count completions after the next scheduled release, not observed device underruns. Combined CPU budget is summed measured callback thread CPU divided by nominal audio duration, in percent of one core (can exceed 100%). Producers use ordinary OS scheduling; no realtime priority or affinity changes. This is not a mixer/output-device test: the independent synthetic sources are not routed to a live scene or captured output.
+
+Final runs on Ryzen 7 7700/Linux Mint, Release, glibc allocation audit:
+
+| Build / workload | Sources | Block budget (us) | Combined CPU (%) | Worst source callback p99 (us) | Callback overruns | Host overruns | Submission deadline misses |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| optimized graph, 48 kHz stereo, 120 | 4 | 2500 | 8.490 | 223.62 | 0 | 0 | 80 |
+| optimized graph, 48 kHz stereo, 480 | 8 | 10000 | 15.285 | 1223.00 | 1 | 1 | 18 |
+| pre-FFT graph, 96 kHz 7.1, 120 | 8 | 1250 | 325.636 | 4956.08 | 1795 | 2096 | 8671 |
+| optimized graph, 96 kHz 7.1, 120 | 8 | 1250 | 115.041 | 969.27 | 78 | 152 | 1860 |
+| optimized spectral gate, 96 kHz 7.1, 120 | 8 | 1250 | 74.121 | 1005.92 | 65 | 128 | 2357 |
+
+All five runs passed the strict output and allocation checks; 56,000 paced measured callbacks on the optimized module and 16,000 on the pre-FFT module. The eight-source stereo run covered 20 seconds of measured audio per source, 160 source-seconds. The surround A/B reduced combined callback CPU by approximately 64.7%; scheduling misses remain significant in the deliberately synchronized 1.25 ms case. These are single-run observations, not statistical estimates of underrun probability. The initial exploratory runs reused OBS source timestamp state; the final measurements recreate sources for each phase to avoid host timestamp discontinuities. Future work: real mixed output capture, realistic staggered sources, scheduler tracing where permitted, and native platform qualification. Do not interpret BENCH_PASS as a deadline guarantee.

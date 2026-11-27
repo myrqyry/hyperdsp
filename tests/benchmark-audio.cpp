@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <barrier>
+#include <memory>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -26,7 +28,7 @@ speaker_layout layout=SPEAKERS_STEREO;
 constexpr std::array<float,8> channel_scale{1,-.4f,.7f,-.2f,.5f,-.8f,.3f,-.6f};
 unsigned warmup=100;
 bool transitions=false;
-unsigned frames=480;
+unsigned frames=480,source_count=1;
 bool telemetry=false;
 const char* ladspa_path=nullptr;
 double budget_us(){return double(frames)*1e6/rate;}
@@ -47,11 +49,11 @@ struct Probe {
     double max_overrun_cpu=0;
     unsigned overrun_cpu=0;
     bool clock=false,ladspa=false;
-    uint64_t samples=0,errors=0,allocations=0,releases=0;
+    uint64_t samples=0,errors=0,allocations=0,releases=0,input_offset=0;
     double cpu_us=0,energy=0,difference=0;
     bool compare=false,record=false;
 };
-Probe* probe=nullptr;
+thread_local Probe* probe=nullptr;
 double cpu_us(){
     timespec t{};
     if(clock_gettime(CLOCK_THREAD_CPUTIME_ID,&t))return 0;
@@ -117,14 +119,14 @@ obs_audio_data* timed(void* ptr,obs_audio_data* data){
             if(!std::isfinite(sample[c])||(p.clock&&std::abs(sample[c]-channel_scale[c]*sample[0])>1e-5f))valid=false;
             if(p.ladspa){
                 const float gain=transitions&&(block/segment_blocks)%2?.5f:.25f;
-                const float expected=channel_scale[c]*latency_contention::sample(p.samples+warmup*frames)*gain;
+                const float expected=channel_scale[c]*latency_contention::sample(p.input_offset+p.samples+warmup*frames)*gain;
                 if(std::abs(sample[c]-expected)>1e-6f)valid=false;
             }
         }
         if(!valid){++p.errors;continue;}
         if(!p.compare){
             p.reference.push_back(sample);
-            auto input=latency_contention::sample(p.samples+warmup*frames);
+            auto input=latency_contention::sample(p.input_offset+p.samples+warmup*frames);
             for(unsigned c=0;c<channels;++c){
                 p.energy+=double(sample[c])*sample[c];
                 auto delta=std::abs(sample[c]-channel_scale[c]*input);
@@ -289,9 +291,152 @@ bool run(void* module,obs_source_t* source,const Case& c,bool strict){
     }
     probe=nullptr;return ok;
 }
+// Each source has its own real OBS filter instance, producer thread, reference
+// waveform and measurement storage. The common release clock intentionally
+// aligns FFT hops across sources rather than hiding them with staggered starts.
+struct PacedSource {
+    obs_source_t* source=nullptr;
+    obs_source_t* filter=nullptr;
+    obs_data_t* settings=nullptr;
+    Probe p;
+    std::vector<double> host,wake,completion;
+    unsigned updates=0,reads=0;
+    ~PacedSource(){close();}
+    void close(){
+        if(filter){obs_source_filter_remove(source,filter);obs_source_release(filter);filter=nullptr;}
+        if(settings){obs_data_release(settings);settings=nullptr;}
+        if(source){obs_source_release(source);source=nullptr;}
+    }
+    bool open(const Case& c,const char* label){
+        source=obs_source_create("hyperdsp_benchmark_source",label,nullptr,nullptr);
+        if(!source)return false;
+        settings=obs_data_create();c.settings(settings);
+        filter=obs_source_create_private(c.id,c.label,settings);
+        if(!filter)return false;
+        obs_source_filter_add(source,filter);return true;
+    }
+};
+double micros(Clock::duration d){return std::chrono::duration<double,std::micro>(d).count();}
+double percentile(std::vector<double> v,double q){
+    if(v.empty())return 0;
+    std::sort(v.begin(),v.end());return v[size_t(q*(v.size()-1))];
+}
+bool paced(void* module,const Case& c,bool strict){
+    // Only fixed-length active workloads are supported in this mode.
+    const std::string_view symbol=c.symbol;
+    if(symbol!="graph_filter"&&symbol!="spectral_filter"){
+        std::fprintf(stderr,"paced mode requires --case graph_chain or spectral_gate\n");return false;
+    }
+    auto* original=static_cast<const obs_source_info*>(dlsym(module,c.symbol));
+    if(!original||!original->filter_audio)return false;
+    obs_source_info info=*original;info.id=c.id;info.filter_audio=timed;obs_register_source(&info);
+    std::vector<std::unique_ptr<PacedSource>> sources;
+    for(unsigned n=0;n<source_count;++n){
+        auto state=std::make_unique<PacedSource>();
+        auto label="Paced "+std::to_string(n);
+        if(!state->open(c,label.c_str()))return false;
+        state->p.original=original;state->p.input_offset=uint64_t(n+1)*10000019;
+        state->p.reference.reserve(blocks*frames);state->p.wall.reserve(blocks);
+        state->host.reserve(blocks);state->wake.reserve(blocks);state->completion.reserve(blocks);
+        sources.push_back(std::move(state));
+    }
+    auto stream=[&](PacedSource& state,bool compare,Clock::time_point start,uint64_t stamp){
+        auto& p=state.p;probe=&p;
+        p.compare=compare;p.samples=p.errors=p.allocations=p.releases=0;p.cpu_us=0;p.wall.clear();
+        p.overrun_cpu=0;p.max_overrun_cpu=0;p.first_us=0;
+        std::array<std::array<float,max_frames>,8> input{};
+        for(unsigned k=0;k<blocks+warmup;++k){
+            auto offset=uint64_t(k)*frames*1000000000ULL/rate;
+            auto due=start+std::chrono::nanoseconds(offset);
+            for(unsigned j=0;j<frames;++j){
+                auto x=latency_contention::sample(p.input_offset+uint64_t(k)*frames+j);
+                for(unsigned ch=0;ch<channels;++ch)input[ch][j]=channel_scale[ch]*x;
+            }
+            obs_source_audio audio{};
+            for(unsigned ch=0;ch<channels;++ch)audio.data[ch]=reinterpret_cast<uint8_t*>(input[ch].data());
+            audio.frames=frames;audio.speakers=layout;audio.format=AUDIO_FORMAT_FLOAT_PLANAR;
+            audio.samples_per_sec=rate;audio.timestamp=stamp+offset;
+            if(compare)std::this_thread::sleep_until(due);
+            auto begin=Clock::now();p.record=k>=warmup;
+            obs_source_output_audio(state.source,&audio);
+            auto end=Clock::now();p.record=false;
+            if(compare&&k>=warmup){
+                state.host.push_back(micros(end-begin));
+                state.wake.push_back(std::max(0.,micros(begin-due)));
+                state.completion.push_back(micros(end-due));
+            }
+        }
+        probe=nullptr;
+    };
+    // Reference from independent instances, without concurrent control edits.
+    for(auto& state:sources){
+        stream(*state,false,Clock::now(),os_gettime_ns());
+        auto& p=state->p;
+        if(p.errors||p.wall.size()!=blocks||p.samples!=uint64_t(blocks)*frames||
+           p.reference.size()!=p.samples||p.energy<=1e-6||p.difference<=1||
+           (alloc_begin&&(p.allocations||p.releases)))return false;
+        state->close();
+        auto label="Paced measured "+std::to_string(state->p.input_offset);
+        if(!state->open(c,label.c_str()))return false;
+    }
+    std::atomic<bool> stop{false};
+    Clock::time_point start;
+    uint64_t stamp=0;
+    std::barrier ready(int(source_count)+1,[&]() noexcept {
+        start=Clock::now()+std::chrono::milliseconds(100);
+        stamp=os_gettime_ns()+100000000ULL;
+    });
+    std::vector<std::thread> audio;
+    audio.reserve(source_count);
+    for(auto& state:sources){
+        auto* s=state.get();
+        audio.emplace_back([&,s]{ready.arrive_and_wait();stream(*s,true,start,stamp);});
+    }
+    // One UI-like thread polls at 20 Hz and submits an irrelevant settings
+    // change at 10 Hz. It never reads or writes the producer-owned Probe.
+    std::thread control([&]{
+        unsigned tick=0;
+        auto next=Clock::now();
+        while(!stop.load()){
+            for(auto& s:sources){
+                if(telemetry&&has_telemetry(c)&&poll(s->filter,c))++s->reads;
+                if(tick%2==0){
+                    obs_data_set_int(s->settings,"benchmark_unused",tick/2%2);
+                    obs_source_update(s->filter,s->settings);++s->updates;
+                }
+            }
+            ++tick;next+=std::chrono::milliseconds(50);std::this_thread::sleep_until(next);
+        }
+    });
+    ready.arrive_and_wait();
+    for(auto& t:audio)t.join();
+    stop=true;control.join();
+    uint64_t errors=0,allocations=0,releases=0,callbacks=0,callback_overruns=0,host_overruns=0,deadline_misses=0;
+    double cpu_budget=0,worst_p99=0,worst_host_p99=0,worst_wake_p99=0,worst_completion_p99=0;
+    bool valid=true;
+    for(unsigned n=0;n<sources.size();++n){
+        auto& s=*sources[n];auto& p=s.p;
+        auto over=[&](const auto& v){return std::count_if(v.begin(),v.end(),[](double t){return t>budget_us();});};
+        auto cb=over(p.wall),host=over(s.host),miss=over(s.completion);
+        double cp=p.cpu_us/(blocks*budget_us())*100;
+        auto p99=percentile(p.wall,.99),host99=percentile(s.host,.99),wake99=percentile(s.wake,.99),end99=percentile(s.completion,.99);
+        bool ok=p.wall.size()==blocks&&p.samples==uint64_t(blocks)*frames&&s.host.size()==blocks&&
+            s.updates>0&&(!telemetry||!has_telemetry(c)||s.reads>0);
+        valid&=ok;errors+=p.errors;allocations+=p.allocations;releases+=p.releases;callbacks+=p.wall.size();
+        callback_overruns+=cb;host_overruns+=host;deadline_misses+=miss;cpu_budget+=cp;
+        worst_p99=std::max(worst_p99,p99);worst_host_p99=std::max(worst_host_p99,host99);
+        worst_wake_p99=std::max(worst_wake_p99,wake99);worst_completion_p99=std::max(worst_completion_p99,end99);
+        std::printf("PACED_SOURCE index=%u callbacks=%zu samples=%llu errors=%llu updates=%u reads=%u cpu_budget_pct=%.3f callback_p99_us=%.2f host_p99_us=%.2f wake_p99_us=%.2f completion_p99_us=%.2f callback_overruns=%zu host_overruns=%zu deadline_misses=%zu valid=%d\n",
+            n,p.wall.size(),(unsigned long long)p.samples,(unsigned long long)p.errors,s.updates,s.reads,cp,p99,host99,wake99,end99,size_t(cb),size_t(host),size_t(miss),ok);
+    }
+    std::printf("PACED effect=%s sources=%u rate=%u channels=%u frames=%u callbacks=%llu errors=%llu allocation_calls=%llu free_calls=%llu total_cpu_budget_pct=%.3f worst_callback_p99_us=%.2f worst_host_p99_us=%.2f worst_wake_p99_us=%.2f worst_completion_p99_us=%.2f callback_overruns=%llu host_overruns=%llu deadline_misses=%llu audit=%d valid=%d\n",
+        c.label,source_count,rate,channels,frames,(unsigned long long)callbacks,(unsigned long long)errors,(unsigned long long)allocations,(unsigned long long)releases,cpu_budget,worst_p99,worst_host_p99,worst_wake_p99,worst_completion_p99,(unsigned long long)callback_overruns,(unsigned long long)host_overruns,(unsigned long long)deadline_misses,bool(alloc_begin),valid);
+    return valid&&(!strict||(!errors&&(!alloc_begin||(!allocations&&!releases))));
+}
+
 }
 int main(int argc,char** argv){
-    if(argc<3){std::fprintf(stderr,"usage: %s module.so data-dir [--allow-mismatch] [--frames 120|480] [--rate 48000|96000] [--channels 1|2|6|8] [--telemetry] [--cold] [--transitions] [--ladspa /path/amp.so] [--case name]\n",argv[0]);return 2;}
+    if(argc<3){std::fprintf(stderr,"usage: %s module.so data-dir [--allow-mismatch] [--frames 120|480] [--rate 48000|96000] [--channels 1|2|6|8] [--telemetry] [--cold] [--transitions] [--ladspa /path/amp.so] [--case name] [--sources 2|4|8]\n",argv[0]);return 2;}
     bool strict=true;std::string_view selected;
     for(int i=3;i<argc;++i){
         std::string_view option=argv[i];
@@ -311,8 +456,10 @@ int main(int argc,char** argv){
         }
         else if(option=="--ladspa"&&i+1<argc)ladspa_path=argv[++i];
         else if(option=="--case"&&i+1<argc)selected=argv[++i];
+        else if(option=="--sources"&&i+1<argc){std::string_view n=argv[++i];if(n=="2")source_count=2;else if(n=="4")source_count=4;else if(n=="8")source_count=8;else return 2;}
         else return 2;
     }
+    if(source_count>1&&(selected.empty()||transitions||!warmup))return 2;
     alloc_begin=reinterpret_cast<AllocBegin>(dlsym(RTLD_DEFAULT,"hyperdsp_bench_alloc_begin"));
     alloc_end=reinterpret_cast<AllocEnd>(dlsym(RTLD_DEFAULT,"hyperdsp_bench_alloc_end"));
     if(bool(alloc_begin)!=bool(alloc_end))return 2;
@@ -335,7 +482,7 @@ int main(int argc,char** argv){
     obs_register_source(&source_info);
     auto* source=obs_source_create(source_info.id,"Benchmark",nullptr,nullptr);
     if(!source)return 6;
-    bool ok=true;unsigned ran=0;for(const auto& c:cases)if(selected.empty()||selected==c.label){ok=run(module,source,c,strict)&&ok;++ran;}
+    bool ok=true;unsigned ran=0;for(const auto& c:cases)if(selected.empty()||selected==c.label){ok=(source_count>1?paced(module,c,strict):run(module,source,c,strict))&&ok;++ran;}
     ok=ok&&ran>0&&!(selected=="ladspa_amp"&&!ladspa_path);
     obs_source_release(source);dlclose(module);obs_shutdown();
     std::printf("BENCH_PASS=%d strict=%d\n",ok,strict);return ok?0:1;
