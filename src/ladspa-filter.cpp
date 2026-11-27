@@ -2,6 +2,7 @@
 #include "ladspa-catalog.hpp"
 #include "framework/dsp/modulation.hpp"
 #include "framework/dsp/ladspa_engine.hpp"
+#include "framework/dsp/realtime_handoff.hpp"
 #include "framework/dsp/modulation_matrix.hpp"
 #include "interop/external_inputs.hpp"
 #include <ladspa.h>
@@ -24,27 +25,33 @@ std::string route_key(unsigned slot,const char* field){
 using hyperdsp::Control;
 using hyperdsp::key;
 using hyperdsp::target_id;
-struct Instance : hyperdsp::LadspaEngine {
+struct Parameters {
+    hyperdsp::MixSettings mix{};
+    hyperdsp::LfoSettings lfo{};
+    std::array<hyperdsp::LadspaEngine::Route,route_count> routes{};
+    std::array<hyperdsp::RouteConfig,route_count> configs{};
+    std::array<std::string,route_count> targets{};
+    std::array<float,max_ports> values{};
     hyperdsp::ExternalInputs external;
-    void parameters(obs_data_t* settings,bool subscribe=true) {
-        auto mix=hyperdsp::MixSettings::from(obs_data_get_double(settings,"mix"),
+};
+// Metadata (path, label, rate, channels, controls) is immutable after open.
+// All other engine state belongs exclusively to the audio consumer once published.
+struct Instance : hyperdsp::LadspaEngine {
+    Parameters read_parameters(obs_data_t* settings,const hyperdsp::ExternalInputs& previous={},bool subscribe=true)const{
+        Parameters p;p.external=previous;
+        p.mix=hyperdsp::MixSettings::from(obs_data_get_double(settings,"mix"),
             obs_data_get_double(settings,"input_db"),obs_data_get_double(settings,"output_db"));
         const auto target=obs_data_get_int(settings,"lfo_target");
-        hyperdsp::LfoSettings lfo{target>=0&&target<=2?int(target):0,
+        p.lfo={target>=0&&target<=2?int(target):0,
             obs_data_get_double(settings,"lfo_rate"),obs_data_get_double(settings,"lfo_depth")};
-        const bool first=!initialized;
-        if(initialized)modulation.set(mix,lfo);
-        else {modulation.reset(rate,mix,lfo);initialized=true;}
-        any_route=any_port=false;
         for(unsigned slot=0;slot<route_count;++slot){
-            auto& r=routes[slot];
+            auto& r=p.routes[slot];
             auto integer=[&](const char* key){return obs_data_get_int(settings,route_key(slot,key).c_str());};
             auto number=[&](const char* key){return obs_data_get_double(settings,route_key(slot,key).c_str());};
+            auto& target=p.targets[slot];target=obs_data_get_string(settings,route_key(slot,"target").c_str());
             const auto source=integer("source"),shape=integer("shape");
-            const std::string target=obs_data_get_string(settings,route_key(slot,"target").c_str());
-            r.saved_target=target;
             r.source=source>=0&&source<=10?int(source):0;
-            r.port=-1;r.mix=target=="mix";r.output=target=="output";
+            r.mix=target=="mix";r.output=target=="output";
             for(const auto& c:controls)
                 if(!c.integer&&!c.toggle&&c.max>c.min&&target==target_id(path,label,c.port)){
                     r.port=int(c.port);r.min=c.min;r.max=c.max;
@@ -53,14 +60,12 @@ struct Instance : hyperdsp::LadspaEngine {
             const double limit=r.port>=0?10000.:1.;
             const float amount=hyperdsp::MixSettings::bounded(number("amount"),-limit,limit,0);
             const int destination=r.port>=0?r.port+2:r.mix?0:r.output?1:-1;
-            matrix.configure(slot,rate,{r.source,destination,shape>=0&&shape<=3?int(shape):0,
-                number("rate"),amount,number("attack"),number("release"),number("sensitivity")},first);
-            if(subscribe)external.configure(slot,r.source,obs_data_get_string(settings,route_key(slot,r.source>=7?"sight_channel":"sound_channel").c_str()),
+            p.configs[slot]={r.source,destination,shape>=0&&shape<=3?int(shape):0,
+                number("rate"),amount,number("attack"),number("release"),number("sensitivity")};
+            if(subscribe)p.external.configure(slot,r.source,obs_data_get_string(settings,route_key(slot,r.source>=7?"sight_channel":"sound_channel").c_str()),
                 obs_data_get_string(settings,route_key(slot,"sound_category").c_str()));
-            any_route=any_route||r.source!=0;
-            any_port=any_port||(r.source!=0&&r.port>=0);
         }
-        for(auto& c:controls){
+        for(const auto& c:controls){
             auto k=key(c.port);
             if(c.toggle)obs_data_set_default_bool(settings,k.c_str(),c.initial!=0);
             else obs_data_set_default_double(settings,k.c_str(),c.initial);
@@ -68,21 +73,47 @@ struct Instance : hyperdsp::LadspaEngine {
                 (c.toggle?double(obs_data_get_bool(settings,k.c_str())):obs_data_get_double(settings,k.c_str())):c.initial;
             float value=std::isfinite(raw)?float(std::clamp(raw,double(c.min),double(c.max))):c.initial;
             if(c.integer||c.toggle)value=std::clamp(std::round(value),c.min,c.max);
-            set_control(c,value);
+            p.values[c.port]=value;
         }
+        return p;
     }
-    bool open(obs_data_t* settings,unsigned sr,unsigned ch,bool subscribe=true){
+    void apply(const Parameters& p){
+        const bool first=!initialized;
+        if(first){modulation.reset(rate,p.mix,p.lfo);initialized=true;}
+        else modulation.set(p.mix,p.lfo);
+        routes=p.routes;any_route=any_port=false;
+        for(unsigned slot=0;slot<route_count;++slot){
+            const auto& r=routes[slot];matrix.configure(slot,rate,p.configs[slot],first);
+            any_route=any_route||r.source!=0;any_port=any_port||(r.source!=0&&r.port>=0);
+        }
+        for(const auto& c:controls)set_control(c,p.values[c.port]);
+    }
+    bool open(obs_data_t* settings,unsigned sr,unsigned ch,Parameters& parameters,bool subscribe=true){
         return LadspaEngine::open(obs_data_get_string(settings,"library"),obs_data_get_string(settings,"label"),sr,ch,
-            [&](auto&){parameters(settings,subscribe);return true;});
+            [&](auto&){parameters=read_parameters(settings,parameters.external,subscribe);apply(parameters);return true;});
     }
-    void process(obs_audio_data* audio){
+    void process(obs_audio_data* audio,const Parameters& parameters){
         std::array<float*,8> p{};
         for(unsigned c=0;c<channels;++c)p[c]=reinterpret_cast<float*>(audio->data[c]);
-        matrix.external_values(external.snapshot());
+        matrix.external_values(parameters.external.snapshot());
         LadspaEngine::process(p.data(),channels,audio->frames);
     }
 };
-struct Filter {std::mutex mutex;std::unique_ptr<Instance> active;obs_source_t* source=nullptr;};
+struct Packet {
+    std::shared_ptr<Instance> instance;
+    Parameters parameters;
+    uint64_t generation=0;
+    bool initial=false;
+};
+struct Filter {
+    obs_source_t* source=nullptr;
+    std::mutex control;
+    std::shared_ptr<Instance> accepted;
+    hyperdsp::ExternalInputs external;
+    std::array<std::string,route_count> targets;
+    uint64_t generation=0,applied=0;
+    hyperdsp::RealtimeHandoff<Packet> handoff;
+};
 bool format(unsigned& rate,unsigned& channels){
     obs_audio_info ai{};
     if(!obs_get_audio_info(&ai))return false;
@@ -113,23 +144,32 @@ void update(void* ptr,obs_data_t* settings){
     auto* f=static_cast<Filter*>(ptr);if(!f)return;
     unsigned rate=0,ch=0;
     if(!format(rate,ch))return;
-    {
-        std::lock_guard lock(f->mutex);
-        if(f->active&&f->active->path==obs_data_get_string(settings,"library")&&
-           f->active->label==obs_data_get_string(settings,"label")&&f->active->rate==rate&&f->active->channels==ch){
-            f->active->parameters(settings);return;
+    try{
+        std::lock_guard lock(f->control);
+        auto next=std::make_unique<Packet>();
+        if(f->accepted&&f->accepted->path==obs_data_get_string(settings,"library")&&
+           f->accepted->label==obs_data_get_string(settings,"label")&&f->accepted->rate==rate&&f->accepted->channels==ch){
+            next->instance=f->accepted;
+            next->parameters=next->instance->read_parameters(settings,f->external);
+        }else{
+            // Instantiate and activate with initial port values off audio.
+            auto instance=std::make_shared<Instance>();
+            if(instance->open(settings,rate,ch,next->parameters)){
+                next->instance=std::move(instance);next->initial=true;
+            }else next->parameters={};
         }
-    }
-    // Load, instantiate and destroy native code off the audio callback.
-    auto next=std::make_unique<Instance>();
-    if(!next->open(settings,rate,ch))next.reset();
-    {std::lock_guard lock(f->mutex);f->active.swap(next);}
+        f->targets=next->parameters.targets;
+        f->external=next->parameters.external;
+        f->accepted=next->instance;
+        next->generation=++f->generation;
+        f->handoff.publish(std::move(next));
+    }catch(const std::exception& e){blog(LOG_WARNING,"[HyperDSP LADSPA] Settings preparation failed: %s",e.what());}
 }
 void* create(obs_data_t* s,obs_source_t* source){auto f=std::make_unique<Filter>();f->source=source;update(f.get(),s);return f.release();}
 void destroy(void* p){delete static_cast<Filter*>(p);}
-void fill_targets(obs_properties_t* props,const Instance* instance,obs_data_t* settings=nullptr){
+void fill_targets(obs_properties_t* props,const Instance* instance,obs_data_t* settings=nullptr,const std::array<std::string,route_count>* targets=nullptr){
     for(unsigned slot=0;slot<route_count;++slot){
-        const std::string saved=settings?obs_data_get_string(settings,route_key(slot,"target").c_str()):instance?instance->routes[slot].saved_target:"";
+        const std::string saved=settings?obs_data_get_string(settings,route_key(slot,"target").c_str()):targets?(*targets)[slot]:"";
         auto* target=obs_properties_get(props,route_key(slot,"target").c_str());if(!target)continue;
         obs_property_list_clear(target);
         obs_property_list_add_string(target,"Wet / dry","mix");
@@ -152,9 +192,9 @@ void add_controls(obs_properties_t* props,const std::vector<Control>& controls){
 }
 bool modified(obs_properties_t* props,obs_property_t*,obs_data_t* settings){
     for(unsigned p=0;p<max_ports;++p)obs_properties_remove_by_name(props,key(p).c_str());
-    unsigned rate=0,ch=0;Instance inspect;
+    unsigned rate=0,ch=0;Instance inspect;Parameters parameters;
     fill_targets(props,nullptr,settings);
-    if(format(rate,ch)&&inspect.open(settings,rate,ch,false)){
+    if(format(rate,ch)&&inspect.open(settings,rate,ch,parameters,false)){
         fill_targets(props,&inspect,settings);
         for(auto& c:inspect.controls){
             auto k=key(c.port);
@@ -336,15 +376,25 @@ obs_properties_t* properties(void* p){
     obs_property_set_long_description(wet,"0 = dry, 1 = wet. Input and output gain remain active with a valid effect; missing effects bypass unmodified. No latency compensation.");
     obs_property_set_modified_callback(path,manual_modified);
     obs_property_set_modified_callback(label,manual_modified);
-    if(p){auto* f=static_cast<Filter*>(p);std::lock_guard lock(f->mutex);
-        if(f->active){add_controls(props,f->active->controls);fill_targets(props,f->active.get());}}
+    if(p){
+        auto* f=static_cast<Filter*>(p);
+        std::shared_ptr<Instance> accepted;std::array<std::string,route_count> targets;
+        {std::lock_guard lock(f->control);accepted=f->accepted;targets=f->targets;}
+        if(accepted){add_controls(props,accepted->controls);fill_targets(props,accepted.get(),nullptr,&targets);}
+    }
     return props;
 }
 obs_audio_data* process(void* p,obs_audio_data* audio){
     auto* f=static_cast<Filter*>(p);if(!f||!audio)return audio;
-    std::unique_lock lock(f->mutex,std::try_to_lock);
+    auto* packet=f->handoff.consume();
     unsigned rate=0,ch=0;
-    if(lock.owns_lock()&&f->active&&format(rate,ch)&&rate==f->active->rate&&ch==f->active->channels)f->active->process(audio);
+    if(!packet||!packet->instance||!format(rate,ch)||rate!=packet->instance->rate||ch!=packet->instance->channels)return audio;
+    auto& instance=*packet->instance;
+    if(f->applied!=packet->generation){
+        if(!packet->initial)instance.apply(packet->parameters);
+        f->applied=packet->generation;
+    }
+    instance.process(audio,packet->parameters);
     return audio;
 }
 }

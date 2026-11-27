@@ -1,6 +1,7 @@
 #pragma once
 #include "latency-contention-fixture.hpp"
 #include <vector>
+#include <string>
 
 namespace history_contention {
 struct Probe {
@@ -29,18 +30,21 @@ inline obs_audio_data* inspect(void* ptr,obs_audio_data* a){
 // Compare two freshly constructed real OBS filters: identical audio, identical
 // active controls, but one receives concurrent changes to a mode-inactive control.
 // The input alternates signal/silence to exercise state and effect tails.
-inline bool verify(obs_source_t* source,const char* id,obs_data_t* settings,const char* key,double a,double b){
+inline bool verify(obs_source_t* source,const char* id,obs_data_t* settings,const char* key,double a,double b,const char* replacement_label=nullptr){
     constexpr unsigned blocks=1000,frames=480;
     Probe probe;probe.reference.reserve(blocks*frames);active=&probe;
     obs_source_info info{.id="hyperdsp_history_test_probe",.type=OBS_SOURCE_TYPE_FILTER,.output_flags=OBS_SOURCE_AUDIO,
         .get_name=name,.create=create,.destroy=destroy,.filter_audio=inspect};
-    obs_register_source(&info);
+    static bool registered=false;
+    if(!registered){obs_register_source(&info);registered=true;}
     auto* watcher=obs_source_create_private(info.id,"history probe",nullptr);
     if(!watcher){active=nullptr;return false;}
     obs_source_filter_add(source,watcher);
-    unsigned updates=0;
+    unsigned updates=0,property_reads=0;bool metadata_ok=true;
+    const std::string initial_label=obs_data_get_string(settings,"label");
     auto run=[&](bool concurrent){
         obs_data_set_double(settings,key,a);
+        if(replacement_label)obs_data_set_string(settings,"label",initial_label.c_str());
         auto* filter=obs_source_create_private(id,"history test",settings);
         if(!filter)return false;
         obs_source_filter_add(source,filter);obs_source_filter_set_order(source,filter,OBS_ORDER_MOVE_TOP);
@@ -50,7 +54,14 @@ inline bool verify(obs_source_t* source,const char* id,obs_data_t* settings,cons
             writer=std::thread([&]{
                 while(!stop.load()){
                     obs_data_set_double(settings,key,updates%2?a:b);
+                    if(replacement_label)obs_data_set_string(settings,"label",updates%2?initial_label.c_str():replacement_label);
                     obs_source_update(filter,settings);++updates;ready=true;
+                    if(replacement_label&&updates%16==0){
+                        auto* props=obs_source_properties(filter);
+                        metadata_ok=metadata_ok&&props&&obs_properties_get(props,"port_0");
+                        if(props)obs_properties_destroy(props);
+                        ++property_reads;
+                    }
                 }
             });
             while(!ready.load())std::this_thread::yield();
@@ -68,9 +79,9 @@ inline bool verify(obs_source_t* source,const char* id,obs_data_t* settings,cons
         obs_source_filter_remove(source,filter);obs_source_release(filter);
         return probe.samples==uint64_t(blocks)*frames;
     };
-    bool ok=run(false)&&run(true)&&probe.reference.size()==uint64_t(blocks)*frames&&probe.energy>1&&updates>10&&!probe.errors;
+    bool ok=run(false)&&run(true)&&probe.reference.size()==uint64_t(blocks)*frames&&probe.energy>1&&updates>10&&!probe.errors&&metadata_ok&&(!replacement_label||property_reads>0);
     obs_source_filter_remove(source,watcher);obs_source_release(watcher);active=nullptr;
-    std::printf("HISTORY_CONTENTION id=%s updates=%u samples=%zu errors=%zu energy=%g pass=%d\n",id,updates,probe.samples,probe.errors,probe.energy,ok);
+    std::printf("HISTORY_CONTENTION id=%s updates=%u samples=%zu errors=%zu energy=%g property_reads=%u pass=%d\n",id,updates,probe.samples,probe.errors,probe.energy,property_reads,ok);
     return ok;
 }
 }
