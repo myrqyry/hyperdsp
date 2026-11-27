@@ -75,7 +75,8 @@ private:
     void addRoute();
     void removeRoute();
     QLabel* status_=nullptr;
-    bool statusError_=false;
+    bool statusError_=false,themeRefreshPending_=false;
+    void scheduleThemeRefresh();
     void refreshTargets();
     void refreshLibrary();
     void redraw();
