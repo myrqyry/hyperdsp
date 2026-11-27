@@ -152,3 +152,31 @@ the required Builder is enabled. No separate Qt runtime, production
 behavior change or reduced inventory. The three affected cases passed
 locally without QtTest, with the full 59-case portable-dependency suite
 used as the regression gate.
+
+## First native test execution (2026-11-27)
+
+PR #2 run 46069144154 at 10801c4: Linux 2/2 passed; all four
+macOS targets compiled and reached all 59 CTests (50–52 passed per
+target). Windows stopped at MSVC C2375 in the test-only LADSPA
+amplifier (SDK declaration versus dllexport redeclaration).
+Export the existing C-linkage symbol through a Windows .def file
+instead; a small x86-64 Windows-target Clang/LLD PE/COFF link test
+using the pinned SDK declaration confirmed the exact ladspa_descriptor
+export. This is not a full Windows build.
+
+macOS timeouts affected long paced OBS integration tests; logs show
+source timestamp drift, and graph-recovery took 20.88 s versus roughly
+four seconds locally. Use absolute steady-clock packet deadlines in
+the eleven paced source fixtures instead of accumulating sleep_for
+overshoot. No packet counts, signal checks, or timeout limits changed.
+The native timeout cause is not proven until the rerun. Filter-analysis
+also intermittently failed numeric/region edit assertions; use the
+C locale for numeric input and print entered text, focus, committed
+frequency and band settings. The widget test driver now has per-test
+instance gesture state, explicit event modifiers, numeric ASCII key
+mapping, and a precise timer/event-loop wait. Review suggestions
+addressed without changing production code or removing assertions.
+
+Local CMake 4.2.3 portable-dependency build: 59/59 tests passed
+(38.59 s), exact JUnit inventory verified. Native CI must still
+confirm the fixes; this does not establish full Windows/macOS support.

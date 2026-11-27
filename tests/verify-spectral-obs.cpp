@@ -68,6 +68,7 @@ static obs_source_info fixture_source = {
 static void stream(obs_source_t* source, int rounds, double hz, float amplitude=1) {
     static constexpr uint32_t FRAMES=480;
     std::array<float, FRAMES> l{},r{};
+    const auto release=std::chrono::steady_clock::now();
     uint64_t start=os_gettime_ns();
     for (int k=0;k<rounds;++k) {
         for (unsigned i=0;i<FRAMES;++i) {
@@ -84,7 +85,7 @@ static void stream(obs_source_t* source, int rounds, double hz, float amplitude=
         audio.samples_per_sec=48000;
         audio.timestamp=start+uint64_t(k)*10000000ULL;
         obs_source_output_audio(source,&audio);
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        std::this_thread::sleep_until(release+std::chrono::milliseconds(10*(k+1)));
     }
 }
 int main(int argc,char**argv){
