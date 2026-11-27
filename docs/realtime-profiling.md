@@ -115,3 +115,37 @@ The final six strict runs used the same Linux Release module (0c7d0ea); each mea
 Total: 384,000 callbacks, 31 wall-time budget overruns, zero measured thread-CPU budget overruns. Prior exploratory runs also showed occasional wall overruns. The elapsed/CPU distinction is consistent with scheduling interruptions, but not a trace of their exact cause. Largest initial cold callback in the final stereo cold run: 42.94 us (Color). Largest structural-boundary callback, including initial adoption: 170.23 us (Color, 7.1); zero allocation/free calls across all measured boundaries. On the 7.1 workload, the three-effect graph's p99 reached 86% of its 1.25 ms budget and averaged about 19% of the audio-thread CPU budget while alternating active and dry graph topologies. The spectral FFT hop is the principal measured workload to profile next; the average does not describe peak cost.
 
 Still unqualified: multiple simultaneous audio sources, sustained paced workload, real-time scheduler traces, live rate/layout changes inside one instance (these layouts were separate processes), other LADSPA plugins, and cross-platform/desktop device behavior. This is a test-only change, not an optimization or a claim of end-to-end hard real-time safety.
+
+## FFT optimization, 2026-11-27
+
+The radix-2 FFT now uses stage-contiguous precomputed twiddles and explicit finite-input real/imaginary butterflies, with forward and inverse kernels specialized at compile time. GCC 13 Release optimization reports 16-byte vectorization of the butterfly loop without extra ISA flags or fast-math. The 1024-point FFT table grows by approximately 4 KiB per instance; construction remains on the preparation path, and no allocation occurs during transforms. The 32768-point graph preview's FFT and impulse workspace are heap-owned on the isolated preview worker, not the audio thread. The existing noinline spectral hop boundary from main (bcbb632) is carried forward to preserve packet partition behavior under FMA. No dependency or platform-specific intrinsic was introduced.
+
+Three alternating runs per build/effect, Linux Mint, Ryzen 7 7700, GCC 13.3 Release, 120 frames, 96 kHz, 7.1, warm always-active effect, concurrent no-op settings updates and telemetry where supported. Baseline is the saved production module before this FFT change, at 79bacd3 (runtime source identical to 0c7d0ea), SHA256 e9ce09fa646e19cd1ff81138146cf91e8a5dea02902e4c7c63293bc7d1288c9a. Median of the three concurrent-phase results:
+
+| Workload | Old p99 (us) | New p99 (us) | Old CPU budget | New CPU budget |
+|---|---:|---:|---:|---:|
+| spectral_gate | 1046.88 | 275.66 | 34.463% | 8.217% |
+| graph_chain | 1205.47 | 357.45 | 39.046% | 12.507% |
+
+Both builds measured 24,000 callbacks total (all phases); observed zero allocation/free calls and zero mismatches against each build's own reference, not a bitwise cross-build waveform comparison. Wall-time overruns fell from 156 to 8 across the combined cases and phases (not a guaranteed scheduling improvement). No measured thread-CPU budget overruns in either build. The optimized spectral gate had zero wall overruns under edits; graph had four. CPU and wall timing remain machine/load dependent, and update counts vary because the writer is unpaced.
+
+A separate finite-input microbenchmark pinned to CPU 6 used 30,000 successive 1024-point forward/inverse pairs with initial real=sin(i*.1f), imag=cos(i*.07f), GCC -O3. Baseline median 132.178 us/pair; optimized median 9.783 us/pair (13.5x). To reproduce, compile the following against each revision's src directory with `g++ -std=c++20 -O3 -Isrc bench.cpp -o bench`, then run `taskset -c 6 ./bench` three times:
+
+```cpp
+#include "framework/dsp/fft.hpp"
+#include <chrono>
+#include <cstdio>
+int main(){
+    hyperdsp::FFT<1024> fft;
+    std::array<std::complex<float>,1024> x{};
+    for(unsigned i=0;i<x.size();++i)x[i]={std::sin(i*.1f),std::cos(i*.07f)};
+    auto start=std::chrono::steady_clock::now();
+    for(unsigned i=0;i<30000;++i){fft.transform(x);fft.transform(x,true);}
+    auto elapsed=std::chrono::duration<double,std::micro>(std::chrono::steady_clock::now()-start).count();
+    std::printf("FFT_PAIR_US=%.3f CHECKSUM=%g\n",elapsed/30000,x[12].real());
+}
+```
+
+For production-path A/B, save the previous module before rebuilding and alternate invocations for the two modules, using `--frames 120 --rate 96000 --channels 8 --telemetry --case spectral_gate` and `--case graph_chain` with the allocator audit described above.
+
+New independent double-precision direct-DFT test covers forward/inverse/round-trip at 2, 4, 8, 32 and 1024 points, impulse/DC/tone/random/low-level inputs. For the 1024-point case the maximum forward absolute error was 2.13073e-5 and inverse 2.08079e-8 on both implementations with the baseline compiler flags. GCC 13 x86-64-v3 builds of FFT and spectral core tests pass, including zero observed partition error; this does not substitute for GCC 15 or native Windows/macOS qualification. The isolated preview also passed on a 512 KiB Linux process stack after moving its large workspace off-stack (the pre-change candidate crashed under that limit).

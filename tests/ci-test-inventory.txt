@@ -16,6 +16,7 @@ effect-builder
 effect-library
 effect-mix
 filter-analysis
+fft
 formant
 formant-obs
 graph-audition

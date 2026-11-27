@@ -62,6 +62,8 @@ int main(){
     const double retained=2*std::hypot(re,im)/48000;
     ok=ok&&retained>.28&&retained<.32&&energy>1900&&energy<2400;
     std::printf("SPECTRAL_OFFBIN retained=%g energy=%g\n",retained,energy);
+    double maxdiff=0;
+    bool partition=true;unsigned badRate=0,badMode=0,badSample=0;
     for(unsigned rate:{44100u,96000u})for(auto mode:{SpectralMode::Gate,SpectralMode::Freeze,SpectralMode::Smear}){
         s=SpectralSettings{};s.mode=mode;s.wet=.65f;s.threshold=-30;
         Spectral block;block.reset(rate,2,s);e.reset(rate,2,s);
@@ -72,15 +74,21 @@ int main(){
             auto left=l,right=r;float* p[]={l.data(),r.data()};block.process(p,2,l.size());
             for(unsigned i=0;i<l.size();++i){
                 float a=left[i],b=right[i];float* q[]={&a,&b};e.process(q,2,1);
-                ok=ok&&std::isfinite(a)&&std::isfinite(b)&&std::abs(a-l[i])<1e-6&&std::abs(b-r[i])<1e-6;
+                maxdiff=std::max({maxdiff,double(std::abs(a-l[i])),double(std::abs(b-r[i]))});
+                const bool matched=std::isfinite(a)&&std::isfinite(b)&&std::abs(a-l[i])<1e-6&&std::abs(b-r[i])<1e-6;
+                if(!matched&&partition){badRate=rate;badMode=unsigned(mode);badSample=k*l.size()+i;std::printf("SPECTRAL_FIRST_MISMATCH rate=%u mode=%u sample=%u scalar=%g,%g block=%g,%g\n",badRate,badMode,badSample,a,b,l[i],r[i]);}
+                partition=partition&&matched;
             }
         }
     }
+    std::printf("SPECTRAL_PARTITION_MAX=%g pass=%d\n",maxdiff,partition);ok=ok&&partition;
     s=SpectralSettings{};s.mode=SpectralMode::Smear;s.smear_ms=200;
     // Wet=0 still aligns to spectral latency. True bypass does not delay.
     s.wet=0;e.reset(48000,1,s);
-    for(int i=0;i<2048;++i){float x=i==0?.7f:0;float* p[]={&x};e.process(p,1,1);ok=ok&&std::abs(x-(i==1024?.7f:0))<1e-6;}
+    double alignmentError=0;
+    for(int i=0;i<2048;++i){float x=i==0?.7f:0;float* p[]={&x};e.process(p,1,1);alignmentError=std::max(alignmentError,double(std::abs(x-(i==1024?.7f:0))));ok=ok&&std::abs(x-(i==1024?.7f:0))<1e-6;}
     s.mode=SpectralMode::Bypass;e.set(s);float x=.3;float* p[]={&x};e.process(p,1,1);ok=ok&&x==.3f;
+    std::printf("SPECTRAL_ALIGNMENT_MAX=%g bypass=%.9g expected=%.9g\n",alignmentError,x,.3f);
     std::printf("SPECTRAL_CORE reconstruction=%g loud=%g quiet=%g frozen=%g released=%g tail=%g late=%g pass=%d\n",reconstruction,loud,quiet,frozen,released,tail,late,ok);
     return ok?0:1;
 }

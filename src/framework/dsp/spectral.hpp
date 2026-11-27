@@ -86,6 +86,16 @@ class Spectral {
         }
         for(unsigned k=0;k<bins;++k)spectrum_[k]=remapped_[k];
     }
+    // Keep a single optimized FFT-hop body regardless of whether process()
+    // is called with one sample or an entire OBS packet. GCC 15 x86-64-v3
+    // otherwise specializes/vectorizes the inlined complex arithmetic with
+    // different FMA contraction, perturbing low-magnitude Smear phase bins.
+    // This boundary is once per 256 samples, not on the per-sample path.
+#if defined(_MSC_VER)
+    __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+    [[gnu::noinline]]
+#endif
     void frame(Channel& ch,float threshold,float range,float hold,float smear,float pitch,float shift){
         for(unsigned j=0;j<n;++j)spectrum_[j]={ch.input[(pos_+j)&(n-1)]*window_[j],0};
         fft_.transform(spectrum_);

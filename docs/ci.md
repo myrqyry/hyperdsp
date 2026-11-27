@@ -2,7 +2,7 @@
 
 Shared obs-plugin-ci pin 359da119f3dd3d1e2d392cbf7e65f5766221cc68.
 Linux profile: OBS32.2.0 on Ubuntu24 and OBS33.0.3 on Ubuntu26.
-The first HyperDSP CI workflow originally required all 54 named tests; the current inventory is 56; the
+The first HyperDSP CI workflow originally required all 54 named tests; the current inventory is 59; the
 JUnit gate rejects missing, extra, skipped or failed tests. Qt Builder,
 Clock Sync and LADSPA SDK fixture support must remain enabled.
 The caller uses the shared SDK shell recipe, Rust pack and payload-manifest
