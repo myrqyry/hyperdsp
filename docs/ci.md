@@ -136,3 +136,19 @@ spectral tests passed with zero packet-partition error.
 Both hosted Linux and native callers require all 59 cases. Hosted
 qualification of the reconciled commit is still required before claiming
 Windows/macOS support; a local CMake 4 result does not substitute for it.
+
+
+## Native Qt SDK test-driver correction (2026-11-27)
+
+Both Linux legs passed for 9700cec (workflow dispatch 46065496698 and
+PR #2 run 46065660442). The six native dispatch logs now fail at
+`Required Qt Test unavailable`, after getting past the dependency policy
+failure. Local configuration with Qt6Test discovery disabled reproduced
+the error. Replaced only the test driver with a small Qt Widgets event
+helper that delivers real press/move/release and key events and pumps
+the event loop. Every existing Builder and filter-analysis assertion and
+interaction is retained; the three widget cases remain mandatory whenever
+the required Builder is enabled. No separate Qt runtime, production
+behavior change or reduced inventory. The three affected cases passed
+locally without QtTest, with the full 59-case portable-dependency suite
+used as the regression gate.

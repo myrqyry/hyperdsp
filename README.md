@@ -22,7 +22,7 @@ for the isolated audition panel remains outstanding. See [CI qualification](docs
 
 ## Build and test (Linux)
 
-Requires a C++20 compiler, CMake, OBS development headers, libobs, Jansson development headers/library, and LADSPA SDK headers (on Mint: libjansson-dev and ladspa-sdk; Clock Sync also uses libsamplerate0-dev). Run `tests/verify.sh` for a fresh Debug build and the configured CTest suite, including numerical DSP checks and real libobs audio capture. Qt widget tests require the Effect Builder dependencies and Qt 6 Test; LADSPA integration and CLI fixture tests require the SDK `amp.so` test plugin and Python 3. No model, download, physical audio device or neural dependency is needed.
+Requires a C++20 compiler, CMake, OBS development headers, libobs, Jansson development headers/library, and LADSPA SDK headers (on Mint: libjansson-dev and ladspa-sdk; Clock Sync also uses libsamplerate0-dev). Run `tests/verify.sh` for a fresh Debug build and the configured CTest suite, including numerical DSP checks and real libobs audio capture. Qt widget tests require the Effect Builder dependencies (Qt 6 Widgets), not a separate Qt Test module; LADSPA integration and CLI fixture tests require the SDK `amp.so` test plugin and Python 3. No model, download, physical audio device or neural dependency is needed.
 
 On a headless Linux host with Xvfb available, run `xvfb-run -a tests/verify.sh` to provide a display for libobs.
 
