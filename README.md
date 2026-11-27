@@ -13,7 +13,7 @@ Standalone deterministic audio effects and DSP hosting for OBS Studio, the audio
 
 Both deterministic effect plugins may optionally consume data published by either Lab plugin without owning inference or requiring its installation. HyperDSP must keep working independently. Future signal consumers should reuse the existing versioned OBS interfaces, read outside the real-time audio callback, and safely handle missing or stale inputs. HyperDSP already consumes optional Sound classification and Sight motion/hand signals via these versioned interfaces.
 
-The first verified target is the microphone coloration filter: dynamic, condenser, ribbon, telephone, vintage radio, tape and dry bypass, with spectral sweep and resonance controls. These are procedural tones, not measured microphone reproductions.
+The first verified target is the microphone coloration filter: dynamic, condenser, ribbon, telephone, vintage radio, tape and dry bypass, with spectral sweep and resonance controls. These are procedural tones, not measured microphone reproductions. Profile stages use fixed-capacity storage and settings are adopted at block boundaries without a processing mutex.
 
 ## Build and test (Linux)
 
@@ -53,7 +53,7 @@ Drag node bodies to arrange the canvas, and drag an output port to an input port
 
 **HyperDSP Graph** is an initial executable serial/parallel effect graph filter. Its versioned JSON definition is editable in OBS filter properties; the graphical Effect Builder is available through the optional Qt dock. The graph supports all 43 native processing modes across twelve families, and a gain/weighted-sum utility. Scanned compatible LADSPA effects can also be used as graph nodes or standalone filters. External native code is trusted code, not sandboxed.
 
-The graph has a single audio input (source index -1), up to 16 nodes and 32 weighted edges, and a selected output. It rejects cycles, disconnected nodes, unsupported effects, non-finite/out-of-range parameters and invalid connections. Parallel paths are aligned to the greatest fixed algorithmic latency at each merge, including Color oversampling and Spectral FFT buffering. Valid graphs are prepared off the audio callback and swapped in; an invalid edit retains the previous active graph; OBS saves its last accepted definition and base control values for recovery on reload. The callback processes bounded chunks with preallocated buffers. A valid replacement resets graph state, and an update collision can briefly bypass; there is no crossfade or scene-wide timestamp alignment.
+The graph has a single audio input (source index -1), up to 16 nodes and 32 weighted edges, and a selected output. It rejects cycles, disconnected nodes, unsupported effects, non-finite/out-of-range parameters and invalid connections. Parallel paths are aligned to the greatest fixed algorithmic latency at each merge, including Color oversampling and Spectral FFT buffering. Valid graphs are prepared off the audio callback and swapped in; an invalid edit retains the previous active graph; OBS saves its last accepted definition and base control values for recovery on reload. The callback processes bounded chunks with preallocated buffers. A valid replacement resets graph state; same-graph control edits preserve state without a processing mutex; there is no crossfade or scene-wide timestamp alignment.
 
 Example: parallel saturated and dry branches. Paste the JSON into the graph filter's properties:
 

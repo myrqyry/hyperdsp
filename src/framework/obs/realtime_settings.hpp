@@ -33,10 +33,21 @@ public:
     }
     template<class Prepare>
     void publish(Settings settings,obs_data_t* data,unsigned rate,unsigned channels,Prepare prepare){
+        publish_with_routes(settings,data,rate,channels,prepare,[](ExternalInputs& external,obs_data_t* data,const Settings& settings){
+            if constexpr(requires {settings.routes;})
+                for(unsigned i=0;i<modulation_slots;++i)obs_routes::connect(external,data,i,settings.routes[i].source);
+        });
+    }
+    template<class Connect>
+    void publish_with_routes(Settings settings,obs_data_t* data,unsigned rate,unsigned channels,Connect connect) requires std::is_void_v<Engine>{
+        publish_with_routes(settings,data,rate,channels,[](auto&,auto,auto,const auto&){},connect);
+    }
+private:
+    template<class Prepare,class Connect>
+    void publish_with_routes(Settings settings,obs_data_t* data,unsigned rate,unsigned channels,Prepare prepare,Connect connect){
         std::lock_guard lock(control_);
         auto next=std::make_unique<Packet>(Packet{settings,accepted_,rate,channels,generation_.load()+1,accepted_engine_});
-        if constexpr(requires {settings.routes;})
-            for(unsigned i=0;i<modulation_slots;++i)obs_routes::connect(next->external,data,i,settings.routes[i].source);
+        connect(next->external,data,settings);
         if constexpr(!std::is_void_v<Engine>){
             if(!next->engine||accepted_rate_!=rate||accepted_channels_!=channels){
                 auto engine=std::make_shared<Engine>();
@@ -49,6 +60,7 @@ public:
         generation_.store(next->generation);
         handoff_.publish(std::move(next));
     }
+public:
     uint64_t latest_generation()const noexcept{return generation_.load();}
     const Packet* consume() noexcept{return handoff_.consume();}
 };

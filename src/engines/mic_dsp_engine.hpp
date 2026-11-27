@@ -6,7 +6,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <vector>
+#include <array>
 
 namespace stts {
 class MicDspEngine {
@@ -20,7 +20,7 @@ public:
     void configure(Profile type, uint32_t sample_rate) {
         profile_ = type;
         sample_rate_ = std::max<uint32_t>(sample_rate, 8000);
-        profile_filters_.clear();
+        profile_count_=0;
         vibe_filter_.reset();
         // Biquad::reset clears state but not coefficients. A profile switch
         // must also restore neutral EQ instead of inheriting the old sweep.
@@ -36,7 +36,7 @@ public:
             dsp::Biquad stage;
             const float safe_frequency = std::clamp(frequency, 5.f, sr * .45f);
             stage.set_coeffs(D::design_rbj(mode, safe_frequency, sr, q, db));
-            profile_filters_.push_back(stage);
+            if(profile_count_<profile_filters_.size())profile_filters_[profile_count_++]=stage;
         };
         switch (type) {
         case DYNAMIC:
@@ -90,7 +90,8 @@ public:
 
     void process(float *samples, size_t count) {
         if (!samples || !count || profile_ == BYPASS) return;
-        for (auto &filter : profile_filters_) {
+        for (unsigned j=0;j<profile_count_;++j) {
+            auto& filter=profile_filters_[j];
             for (size_t i = 0; i < count; ++i) {
                 samples[i] = filter.process(samples[i]);
             }
@@ -130,7 +131,8 @@ private:
 
     Profile profile_ = BYPASS;
     uint32_t sample_rate_ = 48000;
-    std::vector<dsp::Biquad> profile_filters_;
+    std::array<dsp::Biquad,4> profile_filters_{};
+    unsigned profile_count_=0;
     dsp::Biquad vibe_filter_;
     dsp::SmoothedValue vibe_knob_;
     float last_vibe_ = .5f, resonance_ = .707f;

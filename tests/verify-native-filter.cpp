@@ -75,6 +75,15 @@ int main(){
     for(unsigned block=0;block<100;++block){l.fill(0);f.process(ch,2,l.size());}
     auto closed=f.current_frequency();
     ok=ok&&opened>1000&&closed<250;
+    // A topology reset must not expose stale comb taps before the new
+    // ring history reaches them, including fractional interpolation.
+    s=FilterSettings{};s.mode=FilterMode::Comb;s.frequency=1000;s.comb_depth=1;f.reset(sr,s);
+    for(unsigned j=0;j<17000;++j){float x=.8f;float* p[]={&x};f.process(p,1,1);}
+    s.mode=FilterMode::Bypass;f.set(s);s.mode=FilterMode::Comb;f.set(s);
+    bool comb_reset=true;
+    for(unsigned j=0;j<100;++j){float x=j==0?1:0;float* p[]={&x};f.process(p,1,1);
+        float expected=j==0?.5f:j==48?-.5f:0;comb_reset=comb_reset&&std::abs(x-expected)<.00001f;}
+    ok=ok&&comb_reset;std::printf("COMB_RESET_PASS=%d\n",comb_reset);
     std::printf("NATIVE_FILTER low=%g high=%g steep=%g hp=%g,%g bp=%g,%g notch=%g peak=%g shelves=%g,%g,%g,%g comb=%g,%g allpass=%g envelope=%g,%g pass=%d\n",low,high,steep,hp_low,hp_high,bp_center,bp_low,notch,peak,ls_low,ls_high,hs_low,hs_high,comb_notch,comb_pass,allpass,opened,closed,ok);
     return ok?0:1;
 }

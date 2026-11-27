@@ -1,3 +1,4 @@
+#include "history-contention-fixture.hpp"
 // Actual OBS audio routing test: load the built module, instantiate its
 // production Mic filter, attach it to a synthetic stereo source, and capture
 // source output after real filter execution. No fake filter callbacks.
@@ -148,6 +149,9 @@ int main(int argc,char**argv) {
     obs_source_dec_active(source);
     obs_source_filter_remove(source,filter);
     obs_source_release(filter);
+    auto* history=obs_data_create();obs_data_set_int(history,"mic_type",3);
+    bool continuous=history_contention::verify(source,"hyperdsp_mic_filter",history,"unused_test_control",0,1);
+    obs_data_release(history);passed=passed&&continuous;
     obs_source_release(source);
     obs_data_release(settings);
     obs_shutdown();

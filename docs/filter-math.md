@@ -21,3 +21,5 @@ N[Table[{n, Table[1/(2 Cos[Pi (k-1/2)/n]),{k,1,n/2}],
 The C++ numerical regression tests measure actual samples against these independent reference values and test high-pass cutoff, passband, fixed-Q invariance and the existing resonant response. Real OBS stereo capture confirms switching between the 8-pole alignments. At cutoff, resonant Q=1/sqrt(2) gives 0.25 amplitude ratio, while Butterworth gives 1/sqrt(2). These checks are not exhaustive CPU, stability, or UI qualification.
 
 Reference: https://reference.wolfram.com/language/ref/ButterworthFilterModel.html
+
+The standalone adapter prepares legacy-key external modulation subscriptions on the control path and adopts settings at block boundaries without a processing mutex. Continuous settings preserve filter history. Explicit topology changes reset state; comb history uses a constant-time logical reset instead of clearing the 16,384-sample ring per channel.

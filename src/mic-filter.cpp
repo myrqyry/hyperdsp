@@ -11,16 +11,16 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
-#include <mutex>
+#include "framework/obs/realtime_settings.hpp"
 #include <new>
 #include "engines/mic_dsp_engine.hpp"
 
 namespace {
+struct MicConfig{int profile=0;hyperdsp::MicSettings parameters;};
 struct MicFilter {
     std::array<stts::MicDspEngine, MAX_AUDIO_CHANNELS> channels;
-    std::mutex configuration_mutex;
-    std::atomic<int> profile{0};
-    uint32_t sample_rate{48000};
+    hyperdsp::RealtimeSettings<MicConfig> settings;
+    int profile=0;uint32_t sample_rate=0;uint64_t generation=0;
 };
 
 const char* get_name(void*) { return "HyperDSP Microphone DSP"; }
@@ -40,24 +40,14 @@ void update(void* ptr, obs_data_t* settings) {
         selected = 0;
     }
     hyperdsp::MicSettings parameters;hyperdsp::obs_parameters::read(settings,parameters,hyperdsp::mic_parameters);
-    std::lock_guard<std::mutex> lock(data->configuration_mutex);
-    if (data->profile.load(std::memory_order_relaxed) != selected) {
-        data->profile.store(0, std::memory_order_release);
-        for (auto& channel : data->channels)
-            channel.configure(static_cast<stts::MicDspEngine::Profile>(selected),
-                              data->sample_rate);
-    }
-    for (auto& channel : data->channels)
-        channel.set_parameters(parameters.vibe, parameters.resonance);
-    data->profile.store(selected, std::memory_order_release);
+    obs_audio_info ai{};if(!obs_get_audio_info(&ai))return;
+    try{data->settings.publish(MicConfig{selected,parameters},settings,ai.samples_per_sec,get_audio_channels(ai.speakers));}
+    catch(const std::exception& e){blog(LOG_WARNING,"[HyperDSP Microphone] Settings preparation failed: %s",e.what());}
 }
 
 void* create(obs_data_t* settings, obs_source_t*) {
     auto* data = new (std::nothrow) MicFilter();
     if (!data) return nullptr;
-    const audio_t* audio = obs_get_audio();
-    if (audio) data->sample_rate = audio_output_get_sample_rate(audio);
-    if (!data->sample_rate) data->sample_rate = 48000;
     update(data, settings);
     return data;
 }
@@ -80,18 +70,20 @@ obs_properties_t* properties(void*) {
 
 obs_audio_data* filter_audio(void* ptr, obs_audio_data* frame) {
     auto* data = static_cast<MicFilter*>(ptr);
-    if (!data || !frame || data->profile.load(std::memory_order_acquire) == 0)
-        return frame;
-
-    // Audio callbacks do not allocate, wait for a UI update, or access files.
-    std::unique_lock<std::mutex> lock(data->configuration_mutex, std::try_to_lock);
-    if (!lock.owns_lock()) return frame;
-    if (data->profile.load(std::memory_order_relaxed) == 0) return frame;
-
-    const audio_t* audio = obs_get_audio();
-    if (!audio || audio_output_get_sample_rate(audio) != data->sample_rate)
-        return frame; // A rate change needs a fresh configured instance.
-
+    if (!data || !frame)return frame;
+    auto* state=data->settings.consume();
+    obs_audio_info ai{};
+    if(!state||!obs_get_audio_info(&ai)||ai.samples_per_sec!=state->rate||state->rate<8000||state->rate>192000||get_audio_channels(ai.speakers)!=state->channels)return frame;
+    if(state->generation!=data->generation){
+        const auto& config=state->settings;
+        if(data->profile!=config.profile||data->sample_rate!=state->rate){
+            data->profile=config.profile;data->sample_rate=state->rate;
+            for(auto& channel:data->channels)channel.configure(static_cast<stts::MicDspEngine::Profile>(config.profile),state->rate);
+        }
+        for(auto& channel:data->channels)channel.set_parameters(config.parameters.vibe,config.parameters.resonance);
+        data->generation=state->generation;
+    }
+    if(!data->profile)return frame;
     for (size_t channel = 0; channel < MAX_AUDIO_CHANNELS; ++channel) {
         if (frame->data[channel]) {
             data->channels[channel].process(
