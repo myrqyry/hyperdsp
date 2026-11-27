@@ -40,7 +40,9 @@ multiband
 multiband-obs
 native-filter
 native-obs
+portable-discovery
 reactive-source
+scan-process
 space
 space-obs
 spectral

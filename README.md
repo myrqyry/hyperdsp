@@ -24,7 +24,7 @@ On a headless Linux host with Xvfb available, run `xvfb-run -a tests/verify.sh` 
 ### Shared CI packages
 
 [Shared OBS plugin CI](.github/workflows/ci.yml) targets Linux x86-64
-with pinned OBS 32.2.0 and 33.0.3 SDKs. All 54 configured tests, including
+with pinned OBS 32.2.0 and 33.0.3 SDKs. All 56 configured tests, including
 Qt Effect Builder, Clock Sync, real libobs audio and LADSPA discovery,
 are required. The versioned packages contain the plugin, all 11 graph
 presets, licensing and the installed effect-library/scanner tools.
@@ -33,7 +33,7 @@ OBS32 uses `bin/64bit/hyperdsp.so`; OBS33 uses `hyperdsp.so` at the
 plugin root. For local CMake installs, choose
 `-DHYPERDSP_PACKAGE_LAYOUT=legacy` (default) or `modern` for the
 matching target SDK. Do not install two versions together.
-Windows/macOS are not yet qualified. See [CI qualification](docs/ci.md).
+Windows/macOS portability work has begun, but native builds are not yet qualified. See [CI qualification](docs/ci.md).
 
 ## Clock Sync
 
@@ -224,7 +224,7 @@ For more effects, the properties include package suggestions and links to extern
 
 Install the desired packages yourself and scan/reload. Not every plugin in a package qualifies for this host; the catalog lists eligible LADSPA descriptors, not CLAP/LV2/VST variants or guarantees of audio quality. Availability varies by distribution. No package install or download is performed by HyperDSP.
 
-For custom installs, set the colon-separated `LADSPA_PATH` before launching OBS, or use the CLI below with explicit trusted paths. When LADSPA_PATH is set, it replaces default search locations. Otherwise the scanner checks user directories (~/.ladspa and ~/.local/lib/ladspa), system directories and the platform multiarch directory. Symlinked libraries are deduplicated by resolved path.
+For custom installs, set the platform-separated `LADSPA_PATH` (colon on POSIX, semicolon on Windows) before launching OBS, or use the CLI below with explicit trusted paths. When LADSPA_PATH is set, it replaces default search locations. Otherwise the scanner checks user directories (~/.ladspa and ~/.local/lib/ladspa), system directories and the platform multiarch directory. Symlinked libraries are deduplicated by resolved path.
 
 ```sh
 python3 tools/scan-ladspa.py --probe build/hyperdsp-ladspa-probe

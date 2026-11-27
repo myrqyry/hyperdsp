@@ -5,7 +5,7 @@
 #include "framework/dsp/modulation_matrix.hpp"
 #include "interop/external_inputs.hpp"
 #include <ladspa.h>
-#include <dlfcn.h>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -294,7 +294,7 @@ obs_properties_t* properties(void* p){
     browse(props,nullptr,initial);
     fill_categories(props,*browser);
     obs_data_release(initial);
-    auto* path=obs_properties_add_path(props,"library","Trusted LADSPA library",OBS_PATH_FILE,"Shared library (*.so)",nullptr);
+    auto* path=obs_properties_add_path(props,"library","Trusted LADSPA library",OBS_PATH_FILE,hyperdsp::platform::library_filter,nullptr);
     obs_property_set_long_description(path,"Native code executes inside OBS. Only choose plugins you trust.");
     auto* label=obs_properties_add_text(props,"label","Plugin label",OBS_TEXT_DEFAULT);
     auto* input=obs_properties_add_float_slider(props,"input_db","Input gain",-24.,24.,.1);

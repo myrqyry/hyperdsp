@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <vector>
 #include "framework/dsp/ladspa_controls.hpp"
+#include "platform/native_library.hpp"
 
 namespace hyperdsp {
 struct ControlHint {unsigned port;std::string name;LADSPA_PortRangeHint hint;};
@@ -37,7 +38,7 @@ inline bool match_words(std::string searchable,const std::string& query){
 }
 inline bool catalog_matches(const CatalogEntry& e,const std::string& query){
     return match_words(e.name+" "+e.label+" "+e.maker+" "+e.category+" "+
-        std::filesystem::path(e.path).filename().string()+" "+(e.channels==1?"mono":"stereo")+" ladspa",query);
+        platform::utf8_path(platform::native_path(e.path).filename())+" "+(e.channels==1?"mono":"stereo")+" ladspa",query);
 }
 struct CatalogScan {
     static std::string start();
@@ -73,7 +74,7 @@ inline Catalog read_catalog(const std::string& path){
                     e.controls_complete=valid&&obs_data_get_bool(item,"controls_complete");
                     obs_data_array_release(controls);
                 }
-                if(!e.path.empty()&&e.path.front()=='/'&&!e.label.empty()&&!e.name.empty()&&
+                if(platform::absolute_library_path(e.path)&&!e.label.empty()&&!e.name.empty()&&
                     e.path.find('\t')==std::string::npos&&e.label.find('\t')==std::string::npos&&
                     (e.channels==1||e.channels==2))entries.push_back(std::move(e));
                 obs_data_release(item);

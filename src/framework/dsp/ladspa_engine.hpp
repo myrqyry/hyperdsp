@@ -1,7 +1,7 @@
 #pragma once
 #include "ladspa_controls.hpp"
 #include "modulation_matrix.hpp"
-#include <dlfcn.h>
+#include "../../platform/native_library.hpp"
 #include <memory>
 #include <vector>
 namespace hyperdsp {
@@ -39,7 +39,7 @@ struct LadspaEngine {
             if(v->activated&&descriptor->deactivate)descriptor->deactivate(v->handle);
             descriptor->cleanup(v->handle);
         }
-        if(library)dlclose(library);
+        platform::close_library(library);
     }
     LadspaEngine()=default;
     LadspaEngine(const LadspaEngine&)=delete;
@@ -52,10 +52,10 @@ struct LadspaEngine {
         if(library)return false;
         path=file;label=effect;
         rate=sr;channels=ch;
-        if(path.empty()||path.front()!='/'||label.empty()||ch==0||ch>8)return false;
-        library=dlopen(path.c_str(),RTLD_NOW|RTLD_LOCAL);
+        if(!platform::absolute_library_path(path)||label.empty()||ch==0||ch>8)return false;
+        library=platform::open_library(path);
         if(!library)return false;
-        auto entry=reinterpret_cast<LADSPA_Descriptor_Function>(dlsym(library,"ladspa_descriptor"));
+        auto entry=platform::library_symbol<LADSPA_Descriptor_Function>(library,"ladspa_descriptor");
         if(!entry)return false;
         for(unsigned i=0;i<1024;++i){
             auto* d=entry(i);if(!d)break;
