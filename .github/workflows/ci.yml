@@ -1,0 +1,21 @@
+name: Shared OBS plugin CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: hyperdsp-ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    uses: myrqyry/obs-plugin-ci/.github/workflows/build.yml@359da119f3dd3d1e2d392cbf7e65f5766221cc68
+    with:
+      module: hyperdsp
+      profile: linux
+      driver: caller
+      minimum-tests: 54
+      source-package: true
