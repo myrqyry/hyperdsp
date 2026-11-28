@@ -23,3 +23,5 @@ The C++ numerical regression tests measure actual samples against these independ
 Reference: https://reference.wolfram.com/language/ref/ButterworthFilterModel.html
 
 The standalone adapter prepares legacy-key external modulation subscriptions on the control path and adopts settings at block boundaries without a processing mutex. Continuous settings preserve filter history. Explicit topology changes reset state; comb history uses a constant-time logical reset instead of clearing the 16,384-sample ring per channel.
+
+The [Linux callback audit](realtime-profiling.md) includes native low-pass with concurrent settings edits and allocation instrumentation. The [native CI matrix](ci.md) runs the required numerical and OBS integration tests on all eight targets; neither establishes exhaustive mode coverage or a physical-device deadline guarantee.

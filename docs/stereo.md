@@ -9,3 +9,5 @@ The standalone filter estimates exponentially weighted L², R² and L×R at its 
 ## Evidence
 
 Core tests cover neutral identity, mono sum, width 2, M/S gains, balance, dry blend, unsupported layout bypass, graph compatibility/zero fixed latency and exact sample partition agreement on a ramped update. Diagnostics distinguish +1/-1 correlation, cancellation floor, single-channel -3.0103 dB fold loss and undefined correlation. Actual libobs downstream probe measures width 2 on L=.4/R=-.2 as .7/-.5 with correlation -1 and fold loss -15.682 dB; width 0 yields .1/.1 with settled correlation .999994 and negligible fold loss. The graph macro reproduces both outputs. Test verifies stale/disabled diagnostic rejection; registry and CLI tests cover stereo-only compatibility and parameter parity. No physical listening or callback performance benchmark.
+
+The [Linux callback audit](realtime-profiling.md) includes stereo imaging with concurrent settings edits and allocation instrumentation. The [native CI matrix](ci.md) runs the required numerical and OBS integration tests on all eight targets; neither establishes exhaustive mode coverage or a physical-device deadline guarantee.

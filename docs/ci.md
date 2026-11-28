@@ -11,6 +11,27 @@ retain the required trusted project-built helper tools, 11 graph presets
 and license. Source is exported from HEAD without agent/project-state
 files; the manifest verifies the actual binary archive payload.
 
+## Current qualification
+
+PR #2 merged at 5a09e5c. The exact final PR head 2b7dafe passed [run 46088111680](https://github.com/myrqyry/hyperdsp/actions/runs/46088111680), following the all-green [run 46084707743](https://github.com/myrqyry/hyperdsp/actions/runs/46084707743) at c6fea47.
+
+| Target | OBS 32.2.0 | OBS 33.0.3 |
+| --- | --- | --- |
+| Linux x86-64 | 59/59, package passed | 59/59, package passed |
+| Windows x64 | 59/59, package passed | 59/59, package passed |
+| macOS Intel | 59/59, package passed | 59/59, package passed |
+| macOS Apple Silicon | 59/59, package passed | 59/59, package passed |
+
+All eight passing PR legs retain the Builder, Clock Sync, native LADSPA fixture, package checks and installed helper tests. Windows stages CMake-selected SDK runtime DLLs only in the build tree, checks their digests and performs a fresh DLL load preflight before CTest. The Windows stack-limited native-filter test uses heap-owned engines; no production processing was changed. Missing and empty runtime manifests have distinct diagnostics. Native packages do not duplicate host SDK DLLs. Native Windows/macOS audible audition is still unimplemented. These tests qualify the specified SDKs and package/runtime fixtures, not physical device playback, arbitrary third-party effects, desktop interaction or universal hard real-time performance.
+
+Post-merge [main run 46089690710](https://github.com/myrqyry/hyperdsp/actions/runs/46089690710) exposed two Apple Silicon failures after the green PR: OBS 32 Color fallback RMS 0.321089 versus dry 0.282843, and OBS 33 LADSPA contention fixture with zero sample mismatches but zero property reads (14 settings updates). Both reached 58/59. This is a repeatability issue to investigate, not proof of a new DSP regression or a reason to weaken assertions. The PR qualification table above is for the exact tested PR head, not a claim that every subsequent run passes.
+
+Merged main was rebuilt locally against OBS 32.2.0: all 59 required cases passed in 38.81 seconds, with exact JUnit inventory verification. The staged 20-file legacy package passed dynamic library resolution, actual libobs catalog, installed scanner/CLI and isolated mixed-output capture (187 blocks, 191488 sample frames per track, zero errors/missing/invalid). Installed package content matched staging byte-for-byte and the installed-module catalog smoke test passed in an isolated configuration. Existing desktop OBS was not restarted; the live session and physical audio remain separate qualification.
+
+## Historical qualification log
+
+The following entries record earlier checkpoints and their then-current blockers. Later successful runs supersede earlier pending status; test counts and observations are retained for provenance.
+
 Local qualification: fresh Release build against coherent installed OBS
 32.2.0 SDK, 54/54 CTests passed in isolated Xvfb/home, 156.27 seconds.
 Both package layouts independently extracted and verified, including

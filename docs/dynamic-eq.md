@@ -15,3 +15,5 @@ The core test measures all five sample rates (8, 44.1, 48, 96, 192 kHz), with th
 The applied graph Monitor Node activity view now plots the frozen wet response using current smoothed gain and actual frequency/Q, plus detector peak. See [Effect Builder](effect-builder.md).
 
 The standalone OBS adapter publishes fixed-size settings snapshots on the control path and adopts them at audio block boundaries. Ordinary parameter updates preserve the existing detector, filter and ramp histories, without a processing mutex or contention-induced dry fallback. Explicit bypass/mode/crossover changes retain their documented reset behavior. Telemetry is invalidated on accepted updates and is published only for the currently adopted generation; telemetry snapshot contention can skip a display update, not audio processing.
+
+The [Linux callback audit](realtime-profiling.md) includes Dynamic EQ with concurrent settings edits and allocation instrumentation. The [native CI matrix](ci.md) runs the required numerical and OBS integration tests on all eight targets; neither establishes exhaustive mode coverage or a physical-device deadline guarantee.

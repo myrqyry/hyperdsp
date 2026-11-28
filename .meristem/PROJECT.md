@@ -14,6 +14,10 @@ Standalone deterministic audio effects and DSP plugin host for OBS. HyperDSP is 
 - The [README](../README.md) owns build prerequisites and user workflows. On Linux, run `tests/verify.sh` for a fresh Debug CMake build and the configured CTest suite. `CMakeLists.txt` is the authority for test registration and feature gating, including optional Clock Sync and Qt tests. Use numerical DSP checks and real libobs capture for processing changes, and the Qt tests for frontend changes where enabled. Report desktop, hardware, listening, and real-time CPU qualification separately from automated results.
 - The topic documents under `docs/` own subsystem contracts and verification details. [Roadmap](../docs/roadmap.md) owns project direction and pending capabilities. The ownership decision below, topic documents, and Git history retain existing rationale and historical verification evidence; use the Meristem decision and learning logs for new entries when warranted.
 
+## Current qualification (2026-11-27)
+
+The merged real-time refactor removes HyperDSP processing mutexes from all 15 adapters using bounded ownership handoff; telemetry is bounded and nonblocking for audio. Ordinary edits preserve state, structural replacement can reset it. [Profiling](../docs/realtime-profiling.md) records measured Linux callback allocation/timing and isolated mixer evidence. All eight hosted [CI targets](../docs/ci.md) passed 59 required cases and package verification at the final PR #2 head. Post-merge Apple Silicon Color fallback and LADSPA contention fixture failures remain under investigation. This does not establish physical audio, live producer, extreme scheduling or native audition playback qualification. Historical milestones below are preserved as evidence, not current status.
+
 ## Open structural uncertainty
 
 - The roadmap still calls for coordinated microphone DSP migration and installed OBS smoke tests. Repository build and test coverage do not establish the state of production OBS installations or live Sound/Sight deployments.

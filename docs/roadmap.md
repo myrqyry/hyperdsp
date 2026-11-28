@@ -63,7 +63,7 @@ Standalone conventional audio effects and hosting for OBS, with optional inputs 
 
 - Persistent local draft and layout recovery, previous-draft slot, bundled examples and named local presets; atomic individual document writes and corrupt recovery archival; Qt restart/layout regression.
 
-- Ten bundled native graph presets with practical voice and creative reactive chains, independently tested macro endpoints, six sample-format combinations and actual OBS apply/monitor integration.
+- Eleven bundled native graph presets with practical voice and creative reactive chains, independently tested macro endpoints, six sample-format combinations and actual OBS apply/monitor integration.
 
 - Three-band Linkwitz–Riley compressor with phase-matched internal wet/dry, independent band dynamics and reusable crossover, standalone filter and graph metadata.
 
@@ -87,7 +87,13 @@ Standalone conventional audio effects and hosting for OBS, with optional inputs 
 
 - Standalone broadband/three-band transient editor, shared crossover controls, live signed contour/gain telemetry in standalone and graph, shared contour timing.
 
+- Bounded control-to-audio ownership handoff across all 15 filter adapters; audio-owned DSP state, constant-time delay resets, preserved ordinary-edit histories and lock-free telemetry snapshots. Clock Sync output lifetime verified with downstream capture and sanitizers.
+- Stage-contiguous FFT optimization, all-adapter Linux allocation/timing audit, cold and structural transitions, multi-rate/channel and simultaneous-source tests; isolated actual OBS three-track mixer verification. See [profiling evidence](realtime-profiling.md).
+- Full shared CI qualification across Linux, Windows and both macOS architectures for OBS 32.2.0/33.0.3: 59 required tests and verified packages on each of eight legs at the final PR #2 head. Post-merge Apple Silicon test repeatability remains open. Native Windows/macOS audition playback is not included.
+
 ## Next layers
+
+- Finish live qualification: installed desktop/theme interactions, physical audio and actual Sound/Sight producers; measure realistic staggered high-load audio scheduling and native-platform performance. Native Windows/macOS audible audition playback remains a separate implementation task.
 
 - Unified discoverable effect library: favorites, native/installed external/community definitions, backend compatibility, descriptions, safe explicit acquisition and reusable presets. Reset/import/export and a compact native frequency-response view.
 - Extend the shared modulation matrix with a destination registry, configurable detector bands, additional backends, external signals and native port smoothing.
