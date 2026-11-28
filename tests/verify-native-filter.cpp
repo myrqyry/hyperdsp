@@ -3,17 +3,18 @@
 #include <cmath>
 #include <cstdio>
 #include <limits>
+#include <memory>
 using namespace hyperdsp;
 constexpr unsigned sr=48000;
 constexpr double pi=3.141592653589793;
 static double response(FilterSettings s,double hz){
-    NativeFilter engine;engine.reset(sr,s);
+    auto engine=std::make_unique<NativeFilter>();engine->reset(sr,s);
     double sum=0,ref=0;
     for(unsigned i=0;i<sr;i++){
         float x=float(.2*std::sin(2*pi*hz*i/sr));
         float y=x;
         float* channels[]={&y};
-        engine.process(channels,1,1);
+        engine->process(channels,1,1);
         if(i>=sr/2){sum+=double(y)*y;ref+=double(x)*x;}
     }
     return std::sqrt(sum/ref);
@@ -54,7 +55,7 @@ int main(){
     FilterSettings old;old.stages=4;
     ok=ok&&std::abs(response(old,1000)-.25)<.0001;
     // Channel independence, finite bounded settings, live modulation.
-    NativeFilter f;s=FilterSettings{};s.mode=FilterMode::LowPass;s.frequency=1000;
+    auto storage=std::make_unique<NativeFilter>();auto& f=*storage;s=FilterSettings{};s.mode=FilterMode::LowPass;s.frequency=1000;
     f.reset(sr,s);
     std::array<float,480> l{},r{};l[0]=1;
     float* ch[]={l.data(),r.data()};f.process(ch,2,l.size());
@@ -75,6 +76,15 @@ int main(){
     for(unsigned block=0;block<100;++block){l.fill(0);f.process(ch,2,l.size());}
     auto closed=f.current_frequency();
     ok=ok&&opened>1000&&closed<250;
+    // A topology reset must not expose stale comb taps before the new
+    // ring history reaches them, including fractional interpolation.
+    s=FilterSettings{};s.mode=FilterMode::Comb;s.frequency=1000;s.comb_depth=1;f.reset(sr,s);
+    for(unsigned j=0;j<17000;++j){float x=.8f;float* p[]={&x};f.process(p,1,1);}
+    s.mode=FilterMode::Bypass;f.set(s);s.mode=FilterMode::Comb;f.set(s);
+    bool comb_reset=true;
+    for(unsigned j=0;j<100;++j){float x=j==0?1:0;float* p[]={&x};f.process(p,1,1);
+        float expected=j==0?.5f:j==48?-.5f:0;comb_reset=comb_reset&&std::abs(x-expected)<.00001f;}
+    ok=ok&&comb_reset;std::printf("COMB_RESET_PASS=%d\n",comb_reset);
     std::printf("NATIVE_FILTER low=%g high=%g steep=%g hp=%g,%g bp=%g,%g notch=%g peak=%g shelves=%g,%g,%g,%g comb=%g,%g allpass=%g envelope=%g,%g pass=%d\n",low,high,steep,hp_low,hp_high,bp_center,bp_low,notch,peak,ls_low,ls_high,hs_low,hs_high,comb_notch,comb_pass,allpass,opened,closed,ok);
     return ok?0:1;
 }

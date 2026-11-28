@@ -1,8 +1,8 @@
 # CI qualification
 
-Shared obs-plugin-ci pin 359da119f3dd3d1e2d392cbf7e65f5766221cc68.
-Linux profile: OBS32.2.0 on Ubuntu24 and OBS33.0.3 on Ubuntu26.
-The first HyperDSP CI workflow originally required all 54 named tests; the current inventory is 56; the
+Shared obs-plugin-ci pin e9eb704437e606721ee92d7d064c4b8168fd8f53.
+Full profile: OBS 32.2.0 and 33.0.3 on Linux x86-64, Windows x64, macOS Intel and macOS Apple Silicon.
+The first HyperDSP CI workflow originally required all 54 named tests; the current inventory is 59; the
 JUnit gate rejects missing, extra, skipped or failed tests. Qt Builder,
 Clock Sync and LADSPA SDK fixture support must remain enabled.
 The caller uses the shared SDK shell recipe, Rust pack and payload-manifest
@@ -112,3 +112,94 @@ Linux package passed actual libobs catalog callback, probe/scan, CLI and
 Unicode-path discovery. The first staged CLI run exposed a missing return
 when extracting the common entry point; explicit return and rerun passed.
 These are same-host Linux results, not Windows/macOS runtime confirmation.
+
+
+## Reconciled real-time optimization qualification (2026-11-27)
+
+The previous full matrix (run 45960030248) passed both Linux legs but all
+six Windows/macOS legs stopped at dependency configuration: CMake 4 removed
+compatibility with the old Jansson minimum policy version. Reproduced on
+Linux with CMake 4.2.3; after addressing Jansson, the same issue surfaced in
+libsamplerate. Both pinned dependencies now use a dependency-scoped policy
+floor of 3.5 on CMake 4+, preserving a caller's higher floor. Archive
+versions and hashes remain unchanged. No test or feature is disabled.
+
+Reconciled the real-time optimization branch with main, including the local
+Builder theme checkpoint 0e740cf. A fresh Linux Release build using
+CMake 4.2.3, the pinned source dependencies and the native amplifier fixture
+registered exactly 59 tests; 59/59 passed (51.91 s), and the JUnit inventory
+gate accepted all 59. The staged 20-file package passed the real libobs
+catalog, installed scanner, CLI and isolated three-track mixed-output
+tests (187 contiguous blocks, zero errors). GCC 15.2 x86-64-v3 FFT and
+spectral tests passed with zero packet-partition error.
+
+Both hosted Linux and native callers require all 59 cases. Hosted
+qualification of the reconciled commit is still required before claiming
+Windows/macOS support; a local CMake 4 result does not substitute for it.
+
+
+## Native Qt SDK test-driver correction (2026-11-27)
+
+Both Linux legs passed for 9700cec (workflow dispatch 46065496698 and
+PR #2 run 46065660442). The six native dispatch logs now fail at
+`Required Qt Test unavailable`, after getting past the dependency policy
+failure. Local configuration with Qt6Test discovery disabled reproduced
+the error. Replaced only the test driver with a small Qt Widgets event
+helper that delivers real press/move/release and key events and pumps
+the event loop. Every existing Builder and filter-analysis assertion and
+interaction is retained; the three widget cases remain mandatory whenever
+the required Builder is enabled. No separate Qt runtime, production
+behavior change or reduced inventory. The three affected cases passed
+locally without QtTest, with the full 59-case portable-dependency suite
+used as the regression gate.
+
+## First native test execution (2026-11-27)
+
+PR #2 run 46069144154 at 10801c4: Linux 2/2 passed; all four
+macOS targets compiled and reached all 59 CTests (50–52 passed per
+target). Windows stopped at MSVC C2375 in the test-only LADSPA
+amplifier (SDK declaration versus dllexport redeclaration).
+Export the existing C-linkage symbol through a Windows .def file
+instead; a small x86-64 Windows-target Clang/LLD PE/COFF link test
+using the pinned SDK declaration confirmed the exact ladspa_descriptor
+export. This is not a full Windows build.
+
+macOS timeouts affected long paced OBS integration tests; logs show
+source timestamp drift, and graph-recovery took 20.88 s versus roughly
+four seconds locally. Use absolute steady-clock packet deadlines in
+the eleven paced source fixtures instead of accumulating sleep_for
+overshoot. No packet counts, signal checks, or timeout limits changed.
+The native timeout cause is not proven until the rerun. Filter-analysis
+also intermittently failed numeric/region edit assertions; use the
+C locale for numeric input and print entered text, focus, committed
+frequency and band settings. The widget test driver now has per-test
+instance gesture state, explicit event modifiers, numeric ASCII key
+mapping, and a precise timer/event-loop wait. Review suggestions
+addressed without changing production code or removing assertions.
+
+Local CMake 4.2.3 portable-dependency build: 59/59 tests passed
+(38.59 s), exact JUnit inventory verified. Native CI must still
+confirm the fixes; this does not establish full Windows/macOS support.
+
+## Windows-only remaining qualification (2026-11-27)
+
+Run 46081948114 at 4788bdd passed both Linux and all four macOS
+legs, including package verification. Both Windows targets compiled
+and ran CTest (35/59 passed each). 23 tests failed to load the plugin
+with Windows error 126; the Builder test, which links the frontend
+and Widgets directly, passed. This points to dependency discovery in
+the dynamically loaded test process, not a reported DSP mismatch.
+Stage CMake-selected runtime DLLs beside the Windows build-tree test
+executables, verify their digests against the SDK, and perform a
+fresh-process DLL load preflight. Do not include these copies in the
+installed plugin package. The missing dependency itself has not yet
+been identified; native rerun must confirm the correction.
+
+The other Windows failure was the standalone native-filter test.
+Reproduced on Linux with a 1 MiB stack limit (exit 139): nested
+NativeFilter instances contain more than 1 MiB of comb delay storage.
+Allocate the test engines on the heap, as the production adapter
+already does. The same limited-stack test now passes, preserving all
+numerical and reset assertions. Full local portable dependency
+regression: 59/59 passed in 38.80 seconds, exact JUnit inventory
+verified. Windows-specific DLL staging and load preflight await CI.

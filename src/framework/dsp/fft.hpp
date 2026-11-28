@@ -8,7 +8,27 @@ namespace hyperdsp {
 template<unsigned N> class FFT {
     static_assert(N>=2&&(N&(N-1))==0);
     std::array<unsigned,N> reverse_{};
-    std::array<std::complex<float>,N/2> twiddle_{};
+    // Contiguous stage-local weights allow the compiler to vectorize the
+    // finite-input butterflies without complex-library exceptional paths.
+    std::array<std::complex<float>,N-1> twiddle_{};
+    template<bool Inverse> void butterflies(std::array<std::complex<float>,N>& x)const{
+        for(unsigned i=0;i<N;++i)if(reverse_[i]>i)std::swap(x[i],x[reverse_[i]]);
+        for(unsigned half=1;half<N;half*=2){
+            const auto* weights=twiddle_.data()+half-1;
+            for(unsigned start=0;start<N;start+=2*half){
+                auto* low=x.data()+start;
+                auto* high=low+half;
+                for(unsigned j=0;j<half;++j){
+                    const float wr=weights[j].real(),wi=Inverse?-weights[j].imag():weights[j].imag();
+                    const float ar=low[j].real(),ai=low[j].imag();
+                    const float br=high[j].real(),bi=high[j].imag();
+                    const float tr=br*wr-bi*wi,ti=br*wi+bi*wr;
+                    low[j]={ar+tr,ai+ti};high[j]={ar-tr,ai-ti};
+                }
+            }
+        }
+        if constexpr(Inverse)for(auto& v:x)v={v.real()/float(N),v.imag()/float(N)};
+    }
 public:
     FFT(){
         for(unsigned i=0;i<N;++i){
@@ -16,22 +36,15 @@ public:
             for(unsigned n=N;n>1;n>>=1){r=(r<<1)|(x&1);x>>=1;}
             reverse_[i]=r;
         }
-        for(unsigned i=0;i<N/2;++i){
-            const double a=-2*std::numbers::pi*i/N;
-            twiddle_[i]={float(std::cos(a)),float(std::sin(a))};
+        for(unsigned half=1;half<N;half*=2)for(unsigned j=0;j<half;++j){
+            const double a=-2*std::numbers::pi*j/(2*half);
+            twiddle_[half-1+j]={float(std::cos(a)),float(std::sin(a))};
         }
     }
+    // Audio/analysis callers supply bounded finite inputs. No global
+    // fast-math flags, runtime dispatch, heap allocation or ISA requirement.
     void transform(std::array<std::complex<float>,N>& x,bool inverse=false)const{
-        for(unsigned i=0;i<N;++i)if(reverse_[i]>i)std::swap(x[i],x[reverse_[i]]);
-        for(unsigned len=2;len<=N;len*=2){
-            const unsigned half=len/2,step=N/len;
-            for(unsigned start=0;start<N;start+=len)for(unsigned j=0;j<half;++j){
-                const auto w=twiddle_[j*step];
-                const auto a=x[start+j],b=x[start+j+half]*(inverse?std::conj(w):w);
-                x[start+j]=a+b;x[start+j+half]=a-b;
-            }
-        }
-        if(inverse)for(auto& v:x)v/=float(N);
+        if(inverse)butterflies<true>(x);else butterflies<false>(x);
     }
 };
 }

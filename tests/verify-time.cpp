@@ -6,9 +6,21 @@
 using namespace hyperdsp;
 int main(){
     auto near=[](float a,float b){return std::abs(a-b)<.0002f;};
+    // A logical reset must hide all old samples, including the second
+    // interpolation tap, until new history replaces them after a ring wrap.
+    FractionalDelay ring;ring.prepare_samples(4,2);
+    auto write=[&](float x){ring.write(0,x);ring.write(1,-x);ring.advance();};
+    for(unsigned i=0;i<12;++i)write(9);
+    ring.clear();
+    bool reset_ok=ring.read(0,1)==0&&ring.read(1,4)==0;
+    write(2);reset_ok=reset_ok&&near(ring.read(0,1.5f),1)&&near(ring.read(1,1.5f),-1)&&ring.read(0,2)==0;
+    for(unsigned i=3;i<=10;++i)write(float(i));
+    reset_ok=reset_ok&&near(ring.read(0,4),7)&&near(ring.read(1,3.5f),-7.5f);
+    ring.clear();write(4);reset_ok=reset_ok&&near(ring.read(0,1),4)&&ring.read(0,4)==0;
+    std::printf("DELAY_RESET_PASS=%d\n",reset_ok);
     TimeEffect e;TimeSettings s;s.mode=TimeMode::Echo;s.delay_ms=1;s.feedback=.5;s.damping=0;s.wet=1;
     e.reset(48000,2,s);
-    bool ok=true;
+    bool ok=reset_ok;
     for(unsigned i=0;i<200;++i){
         float l=i==0?1:0,r=0;float* p[]={&l,&r};e.process(p,2,1);
         ok=ok&&near(l,i==48?1:i==96?.5:i==144?.25:i==192?.125:0)&&r==0;

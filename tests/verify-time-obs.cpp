@@ -12,6 +12,7 @@
 #include <thread>
 #include <array>
 #include "sound-signal-fixture.hpp"
+#include "history-contention-fixture.hpp"
 
 
 struct Stats {
@@ -49,6 +50,7 @@ static obs_source_info fixture_source = {
 static void stream(obs_source_t* source, int rounds, double hz) {
     static constexpr uint32_t FRAMES=480;
     std::array<float, FRAMES> l{},r{};
+    const auto release=std::chrono::steady_clock::now();
     uint64_t start=os_gettime_ns();
     for (int k=0;k<rounds;++k) {
         for (unsigned i=0;i<FRAMES;++i) {
@@ -65,7 +67,7 @@ static void stream(obs_source_t* source, int rounds, double hz) {
         audio.samples_per_sec=48000;
         audio.timestamp=start+uint64_t(k)*10000000ULL;
         obs_source_output_audio(source,&audio);
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        std::this_thread::sleep_until(release+std::chrono::milliseconds(10*(k+1)));
     }
 }
 int main(int argc,char**argv){
@@ -122,5 +124,10 @@ int main(int argc,char**argv){
         std::abs(bypass[0]-.282843)<.003&&reactive[0]<.003&&std::abs(fallback[0]-bypass[0])<.004;
     std::printf("TIME_OBS cancel=%g align=%g echo=%g ping=%g,%g chorus=%g flange=%g vibrato=%g bypass=%g reactive=%g fallback=%g pass=%d\n",cancel[0],align[0],echo[0],ping[0],ping[1],chorus[0],flange[0],vibrato[0],bypass[0],reactive[0],fallback[0],ok);
     obs_set_output_source(1,nullptr);obs_source_dec_active(source);obs_source_filter_remove(source,filter);
+    auto* history=obs_data_create();
+    obs_data_set_int(history,"mode",1);obs_data_set_double(history,"mix",1);
+    obs_data_set_double(history,"delay_ms",37);obs_data_set_double(history,"feedback",.65);
+    bool continuous=history_contention::verify(source,"hyperdsp_time_filter",history,"depth_ms",0,12);
+    obs_data_release(history);ok=ok&&continuous;
     obs_source_release(filter);obs_source_release(source);obs_data_release(settings);obs_shutdown();return ok?0:1;
 }

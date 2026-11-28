@@ -1,3 +1,4 @@
+#include "history-contention-fixture.hpp"
 #include <obs-module.h>
 #include <util/platform.h>
 #include <array>
@@ -48,7 +49,11 @@ int main(int argc,char** argv){
         calldata_free(&d);return ok;
     };
     stream(.4,-.2);std::printf("STEREO_WIDE %g/%g\n",probe.l,probe.r);bool ok=status(-1,10*std::log10(.01/.37))&&probe.packets&&close(probe.l,.7)&&close(probe.r,-.5);
-    obs_data_set_double(s,"width",0);obs_source_update(filter,s);stream(.4,-.2);
+    obs_data_set_double(s,"width",0);obs_source_update(filter,s);
+    {calldata_t d;calldata_init(&d);
+     ok=ok&&proc_handler_call(obs_source_get_proc_handler(filter),"hyperdsp_stereo_status_v1",&d)&&!calldata_bool(&d,"available");
+     calldata_free(&d);}
+    stream(.4,-.2);
     ok=ok&&close(probe.l,.1)&&close(probe.r,.1);
     // Meter resets at each explicit edit, then follows the new signal.
     std::printf("STEREO_MONO %g/%g\n",probe.l,probe.r);ok=status(1,0)&&ok;
@@ -66,5 +71,8 @@ int main(int argc,char** argv){
     s=obs_source_get_settings(graph);obs_data_set_double(s,"graph_control_width",0);obs_source_update(graph,s);obs_data_release(s);
     stream(.4,-.2);ok=ok&&close(probe.l,.1)&&close(probe.r,.1);
     std::printf("STEREO_OBS_PASS=%d mono=%g/%g packets=%u\n",ok,probe.l,probe.r,probe.packets);
-    obs_source_filter_remove(source,graph);obs_source_filter_remove(source,watcher);obs_source_release(graph);obs_source_release(watcher);obs_source_release(source);obs_shutdown();return ok?0:1;
+    obs_source_filter_remove(source,graph);obs_source_filter_remove(source,watcher);obs_source_release(graph);obs_source_release(watcher);auto* history=obs_data_create();obs_data_set_double(history,"width",2);
+    bool continuous=history_contention::verify(source,"hyperdsp_stereo_filter",history,"unused_test_control",0,1);
+    obs_data_release(history);ok=ok&&continuous;
+    obs_source_release(source);obs_shutdown();return ok?0:1;
 }

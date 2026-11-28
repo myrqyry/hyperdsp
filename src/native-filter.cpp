@@ -5,16 +5,15 @@
 #include "interop/external_inputs.hpp"
 #include <array>
 #include <memory>
-#include <mutex>
+#include "framework/obs/realtime_settings.hpp"
 #include <string>
 #include <initializer_list>
 namespace {
 using namespace hyperdsp;
 struct NativeSource {
-    std::mutex mutex;
+    RealtimeSettings<FilterSettings> parameters;
     NativeFilter filter;
-    ExternalInputs external;
-    unsigned rate=0;
+    unsigned rate=0;uint64_t generation=0;
 };
 std::string extra_key(unsigned slot,const char* field){
     return "mod"+std::to_string(slot+1)+"_"+field;
@@ -62,17 +61,18 @@ void update(void* ptr,obs_data_t* s){
     auto* f=static_cast<NativeSource*>(ptr);if(!f)return;
     auto settings=read(s);
     obs_audio_info ai{};if(!obs_get_audio_info(&ai))return;
-    std::lock_guard lock(f->mutex);
-    for(unsigned slot=0;slot<modulation_slots;++slot){
-        const int source=slot?settings.extra_routes[slot-1].source:int(settings.source);
-        const char* channel_field=source>=7?"sight_channel":"sound_channel";
-        auto channel=slot?extra_key(slot,channel_field):channel_field;
-        auto category=slot?extra_key(slot,"sound_category"):"sound_category";
-        f->external.configure(slot,source,
-            obs_data_get_string(s,channel.c_str()),obs_data_get_string(s,category.c_str()));
-    }
-    if(f->rate!=ai.samples_per_sec){f->rate=ai.samples_per_sec;f->filter.reset(f->rate,settings);}
-    else f->filter.set(settings);
+    try{
+        f->parameters.publish_with_routes(settings,s,ai.samples_per_sec,get_audio_channels(ai.speakers),
+            [](ExternalInputs& external,obs_data_t* s,const FilterSettings& settings){
+                for(unsigned slot=0;slot<modulation_slots;++slot){
+                    const int source=slot?settings.extra_routes[slot-1].source:int(settings.source);
+                    const char* channel_field=source>=7?"sight_channel":"sound_channel";
+                    auto channel=slot?extra_key(slot,channel_field):channel_field;
+                    auto category=slot?extra_key(slot,"sound_category"):"sound_category";
+                    external.configure(slot,source,obs_data_get_string(s,channel.c_str()),obs_data_get_string(s,category.c_str()));
+                }
+            });
+    }catch(const std::exception& e){blog(LOG_WARNING,"[HyperDSP Filter] Settings preparation failed: %s",e.what());}
 }
 void* create(obs_data_t* s,obs_source_t*){
     auto f=std::make_unique<NativeSource>();update(f.get(),s);return f.release();
@@ -176,15 +176,19 @@ obs_properties_t* properties(void*){
 obs_audio_data* process(void* ptr,obs_audio_data* audio){
     auto* f=static_cast<NativeSource*>(ptr);
     if(!f||!audio)return audio;
-    std::unique_lock lock(f->mutex,std::try_to_lock);
-    if(!lock.owns_lock())return audio;
+    auto* state=f->parameters.consume();
     obs_audio_info ai{};
-    if(!obs_get_audio_info(&ai)||ai.samples_per_sec!=f->rate||f->rate<8000||f->rate>192000)return audio;
+    if(!state||!obs_get_audio_info(&ai)||ai.samples_per_sec!=state->rate||state->rate<8000||state->rate>192000)return audio;
     const auto ch=get_audio_channels(ai.speakers);
-    if(ch>MAX_AUDIO_CHANNELS)return audio;
+    if(!ch||ch>MAX_AUDIO_CHANNELS||ch!=state->channels)return audio;
+    if(state->generation!=f->generation){
+        if(f->rate!=state->rate){f->rate=state->rate;f->filter.reset(f->rate,state->settings);}
+        else f->filter.set(state->settings);
+        f->generation=state->generation;
+    }
     std::array<float*,MAX_AUDIO_CHANNELS> buffers{};
     for(unsigned i=0;i<ch;++i)buffers[i]=reinterpret_cast<float*>(audio->data[i]);
-    f->filter.external_values(f->external.snapshot());
+    f->filter.external_values(state->external.snapshot());
     f->filter.process(buffers.data(),ch,audio->frames);
     return audio;
 }

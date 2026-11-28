@@ -12,7 +12,9 @@ static const char* const names[]={"Gain","Input","Output","Input 2","Output 2"};
 static const LADSPA_PortRangeHint hints[]={{LADSPA_HINT_BOUNDED_BELOW|LADSPA_HINT_LOGARITHMIC|LADSPA_HINT_DEFAULT_1,0,0},{},{},{},{}};
 static LADSPA_Descriptor descriptor(bool stereo){LADSPA_Descriptor d{};d.UniqueID=stereo?1049:1048;d.Label=stereo?"amp_stereo":"amp_mono";d.Properties=LADSPA_PROPERTY_HARD_RT_CAPABLE;d.Name=stereo?"Stereo Amplifier":"Mono Amplifier";d.Maker="HyperDSP test fixture";d.Copyright="Test-only";d.PortCount=stereo?5:3;d.PortDescriptors=ports;d.PortNames=names;d.PortRangeHints=hints;d.instantiate=create;d.connect_port=connect;d.run=run;d.cleanup=cleanup;return d;}
 #ifdef _WIN32
-extern "C" __declspec(dllexport)
+// Windows exports this C symbol through native-amp.def. The SDK
+// already declares it without a DLL storage-class attribute.
+extern "C"
 #else
 extern "C" __attribute__((visibility("default")))
 #endif

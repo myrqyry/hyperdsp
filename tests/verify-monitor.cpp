@@ -7,6 +7,8 @@
 #include <cmath>
 #include <numbers>
 #include <algorithm>
+#include <atomic>
+#include <thread>
 using namespace hyperdsp;
 static const char* name(void*){return "Monitor test";}
 static void* create(obs_data_t*,obs_source_t*){return reinterpret_cast<void*>(1);}
@@ -63,6 +65,35 @@ int main(int argc,char** argv){
     ok=ok&&delta.valid[peak]&&std::abs(delta.db[peak]+6)<.1&&!delta.valid[0];
     stereo.size=0;ok=ok&&!readStereo();stereo.size=sizeof(stereo);
     std::printf("MONITOR_STEREO correlation=%g fold=%g spectrum_delta=%g\n",metrics.correlation,metrics.mono_loss_db,delta.db[peak]);
+    // Three simultaneous callers of the production V3 procedure while the
+    // actual OBS audio source publishes coherent stereo/controls snapshots.
+    std::atomic<bool> monitor_done{false},monitor_ok{true};
+    std::atomic<unsigned> monitor_reads{0},monitor_ready{0};
+    std::array<std::thread,3> monitor_readers;
+    for(auto& reader:monitor_readers)reader=std::thread([&]{
+        uint64_t previous=0;++monitor_ready;
+        do{
+            GraphMonitorFrameV3 snapshot{};
+            calldata_t d;calldata_init(&d);calldata_set_ptr(&d,"frame",&snapshot);
+            bool ready=proc_handler_call(obs_source_get_proc_handler(filter),"hyperdsp_graph_monitor_v3",&d)&&calldata_bool(&d,"available");
+            calldata_free(&d);
+            if(!ready)continue;
+            const auto& signal=snapshot.audio.signal;
+            if(signal.sequence<previous||signal.rate!=48000||!snapshot.audio.stereo||signal.control_count!=1||
+                std::string_view(signal.controls[0].id.data())!="level"||std::abs(signal.controls[0].base-.5)>.001)monitor_ok=false;
+            for(unsigned i=0;i<monitor_samples;++i)
+                if(signal.input[i]!=-snapshot.audio.input_right[i]||signal.output[i]!=-snapshot.audio.output_right[i]||
+                    std::abs(signal.output[i]-signal.input[i]*.501187234f)>1e-6f)monitor_ok=false;
+            previous=signal.sequence;++monitor_reads;
+        }while(!monitor_done.load());
+    });
+    while(monitor_ready.load()!=monitor_readers.size())std::this_thread::yield();
+    stream(500);
+    monitor_done=true;for(auto& reader:monitor_readers)reader.join();
+    bool concurrent_monitor=monitor_ok&&monitor_reads>0;
+    std::printf("MONITOR_CONCURRENT reads=%u pass=%d\n",monitor_reads.load(),concurrent_monitor);
+    ok=ok&&concurrent_monitor;
+
     // The production graph routes a square LFO to the macro; the
     // snapshot must report effective and manual values independently.
     obs_data_set_string(settings,"graph_json",R"({"schema":1,"nodes":[{"effect":"gain","inputs":[{"source":-1,"weight":1}]}],"output":0,"controls":[{"id":"level","name":"Level","default":0.5,"bindings":[{"node":0,"parameter":"gain_db","low":-12,"high":0}]}],"routes":[{"control":"level","source":1,"shape":2,"rate":0.05,"amount":0.25}]})");
@@ -127,6 +158,15 @@ int main(int argc,char** argv){
     ok=ok&&core.begin(input.data(),512,48000,t+1000000019ULL);
     core.end(output.data(),512,t+1000000020ULL,controls,0);
     ok=ok&&core.read(pair,t+1000000021ULL)&&!pair.stereo;
+    // An invalidation during a captured block must not resurrect its data.
+    core.invalidate();core.read(pair,t+1000000022ULL);
+    ok=ok&&core.begin(input.data(),monitor_samples,48000,t+1000000023ULL);
+    core.invalidate();
+    core.end(output.data(),monitor_samples,t+1000000024ULL,controls,0);
+    ok=ok&&!core.read(pair,t+1000000025ULL);
+    ok=ok&&core.begin(input.data(),monitor_samples,48000,t+1000000026ULL);
+    core.end(output.data(),monitor_samples,t+1000000027ULL,controls,0);
+    ok=ok&&core.read(pair,t+1000000028ULL);
     obs_source_filter_remove(source,filter);obs_source_release(filter);obs_source_release(source);obs_data_release(settings);obs_shutdown();
     std::printf("GRAPH_MONITOR_PASS=%d\n",ok);return ok?0:1;
 }

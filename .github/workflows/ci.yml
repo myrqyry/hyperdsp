@@ -17,5 +17,5 @@ jobs:
       module: hyperdsp
       profile: full
       driver: caller
-      minimum-tests: 56
+      minimum-tests: 59
       source-package: true

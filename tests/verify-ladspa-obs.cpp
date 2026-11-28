@@ -1,3 +1,4 @@
+#include "history-contention-fixture.hpp"
 // Actual OBS audio routing test: load the built module, instantiate its
 // production Mic filter, attach it to a synthetic stereo source, and capture
 // source output after real filter execution. No fake filter callbacks.
@@ -50,6 +51,7 @@ static obs_source_info fixture_source = {
 static void stream(obs_source_t* source, int rounds, double hz=9000.) {
     static constexpr uint32_t FRAMES=480;
     std::array<float, FRAMES> l{},r{};
+    const auto release=std::chrono::steady_clock::now();
     uint64_t start=os_gettime_ns();
     for (int k=0;k<rounds;++k) {
         for (unsigned i=0;i<FRAMES;++i) {
@@ -66,7 +68,7 @@ static void stream(obs_source_t* source, int rounds, double hz=9000.) {
         audio.samples_per_sec=48000;
         audio.timestamp=start+uint64_t(k)*10000000ULL;
         obs_source_output_audio(source,&audio);
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        std::this_thread::sleep_until(release+std::chrono::milliseconds(10*(k+1)));
     }
 }
 int main(int argc,char**argv) {
@@ -370,6 +372,13 @@ int main(int argc,char**argv) {
         quiet[0],quiet[1],louder[0],louder[1],mono[0],mono[1],unknown[0],unknown[1],dry[0],dry[1],prop_ok,browser_ok,pass);
     obs_set_output_source(1,nullptr);
     obs_source_dec_active(source);obs_source_filter_remove(source,filter);
-    obs_source_release(filter);obs_source_release(source);obs_data_release(settings);obs_shutdown();
+    obs_source_release(filter);
+    auto* history=obs_data_create();
+    obs_data_set_string(history,"library",argv[3]);obs_data_set_string(history,"label","amp_stereo");obs_data_set_double(history,"port_0",.25);
+    // The SDK mono and stereo amplifiers have the same gain contract.
+    bool continuous=history_contention::verify(source,"hyperdsp_ladspa_filter",history,"lfo_rate",1,2);
+    bool replacement=history_contention::verify(source,"hyperdsp_ladspa_filter",history,"lfo_rate",1,2,"amp_mono");
+    obs_data_release(history);pass=pass&&continuous&&replacement;
+    obs_source_release(source);obs_data_release(settings);obs_shutdown();
     return pass?0:1;
 }

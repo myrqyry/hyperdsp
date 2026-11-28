@@ -61,9 +61,32 @@ def stage(root, installed, stage_root, target, version):
     work = installed.parent
     build = work / 'build'
     env = runtime_env(work, target, version)
+    if target == 'windows-x64':
+        manifest = build / 'runtime-dlls-RelWithDebInfo.txt'
+        try:
+            linked = [Path(line) for line in manifest.read_text().splitlines() if line.strip()]
+        except FileNotFoundError as exc:
+            raise ValueError(f'Missing CMake runtime DLL manifest: {manifest}') from exc
+        module_dir = build / 'RelWithDebInfo'
+        if not linked:
+            raise ValueError(f'No linked runtime DLLs reported by CMake: {manifest}')
+        for dll in linked:
+            staged = module_dir / dll.name
+            if not staged.is_file() or sdk.digest(staged) != sdk.digest(dll):
+                raise ValueError(f'Wrong or missing test runtime DLL: {staged}')
+        print('Windows linked test runtime DLLs: ' + ', '.join(p.name for p in linked), flush=True)
+        # The package itself remains free of duplicated host SDK libraries.
+        env['PATH'] = str(module_dir) + os.pathsep + env['PATH']
+        # Test loading independently before running the full suite. Use a
+        # fresh Python process so already-loaded Qt cannot mask dependencies.
+        # LOAD_WITH_ALTERED_SEARCH_PATH includes the DLL directory and PATH,
+        # matching the search used by libobs rather than ctypes defaults.
+        sdk.run(sys.executable, '-c',
+                'import ctypes,sys; ctypes.WinDLL(sys.argv[1], winmode=8); print("HYPERDSP_DLL_LOAD_PASS", flush=True)',
+                module_dir / 'hyperdsp.dll', env=env)
     report = work / 'native.xml'
     sdk.run('ctest', '--test-dir', build, '-C', 'RelWithDebInfo', '--output-on-failure', '--no-tests=error', '--output-junit', report, env=env)
-    sdk.run(sys.executable, root / 'tests/verify-ci-report.py', report, '56')
+    sdk.run(sys.executable, root / 'tests/verify-ci-report.py', report, '59')
     binary, data, notice = caller.layout(stage_root, MODULE, target, version)
     suffix = '.exe' if target == 'windows-x64' else ''
     module = installed / ('hyperdsp.dll' if suffix else 'hyperdsp.so')
@@ -110,5 +133,5 @@ def stage(root, installed, stage_root, target, version):
     catalog = work/'stage-catalog.json'
     sdk.run(sys.executable, tool_dir/'scan-ladspa.py', '--probe', tool_dir/tools[0], '--output', catalog, amp, env=env)
     sdk.run(sys.executable, root/'tests/verify-library-cli.py', tool_dir/tools[1], catalog, env=env)
-    print(f'Native package verified: {len([p for p in stage_root.rglob("*") if p.is_file()])} files; all 56 tests and installed tools')
+    print(f'Native package verified: {len([p for p in stage_root.rglob("*") if p.is_file()])} files; all 59 tests and installed tools')
     return binary

@@ -12,6 +12,7 @@
 #include <thread>
 #include <array>
 #include "sound-signal-fixture.hpp"
+#include "latency-contention-fixture.hpp"
 
 
 struct Stats {
@@ -67,6 +68,7 @@ static obs_source_info fixture_source = {
 static void stream(obs_source_t* source, int rounds, double hz, float amplitude=1) {
     static constexpr uint32_t FRAMES=480;
     std::array<float, FRAMES> l{},r{};
+    const auto release=std::chrono::steady_clock::now();
     uint64_t start=os_gettime_ns();
     for (int k=0;k<rounds;++k) {
         for (unsigned i=0;i<FRAMES;++i) {
@@ -83,7 +85,7 @@ static void stream(obs_source_t* source, int rounds, double hz, float amplitude=
         audio.samples_per_sec=48000;
         audio.timestamp=start+uint64_t(k)*10000000ULL;
         obs_source_output_audio(source,&audio);
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        std::this_thread::sleep_until(release+std::chrono::milliseconds(10*(k+1)));
     }
 }
 int main(int argc,char**argv){
@@ -159,6 +161,11 @@ int main(int argc,char**argv){
         smeared[0]>.08&&smeared[0]<.28&&std::abs(bypass[0]-.282843)<.002&&reactive[0]<.001&&
         std::abs(fallback[0]-bypass[0])<.003;
     std::printf("SPECTRAL_OBS gate=%g reconstruction=%g freeze=%g,%g release=%g smear=%g bypass=%g reactive=%g fallback=%g pass=%d\n",gated[0],reconstructed[0],frozen[0],frozen[1],released[0],smeared[0],bypass[0],reactive[0],fallback[0],ok);
+    obs_data_set_int(settings,"mode",1);obs_data_set_int(settings,"route1_source",0);
+    obs_data_set_double(settings,"mix",0);obs_data_set_double(settings,"input_db",0);obs_data_set_double(settings,"output_db",0);
+    obs_source_update(filter,settings);
+    bool continuous=latency_contention::verify(source,filter,settings,1024,"threshold",-30,-50);
+    ok=ok&&continuous;
     obs_set_output_source(1,nullptr);obs_source_dec_active(source);obs_source_filter_remove(source,filter);
     obs_source_release(filter);obs_source_release(source);obs_data_release(settings);obs_shutdown();return ok?0:1;
 }

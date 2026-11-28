@@ -11,6 +11,7 @@
 #include <chrono>
 #include <thread>
 #include <array>
+#include <algorithm>
 #include "sound-signal-fixture.hpp"
 
 
@@ -46,9 +47,24 @@ static obs_source_info fixture_source = {
     .create=fixture_create,
     .destroy=fixture_destroy,
 };
-static void stream(obs_source_t* source, int rounds, double hz) {
+struct PeakProbe {unsigned blocks=0, violations=0;float peak=0;};
+static PeakProbe peak_probe;
+static void* peak_create(obs_data_t*,obs_source_t*){return &peak_probe;}
+static obs_audio_data* peak_inspect(void* ptr,obs_audio_data* audio){
+    auto& probe=*static_cast<PeakProbe*>(ptr);
+    if(!audio||!audio->data[0])return audio;
+    auto* samples=reinterpret_cast<float*>(audio->data[0]);
+    for(unsigned i=0;i<audio->frames;++i){
+        float sample=std::abs(samples[i]);
+        probe.peak=std::max(probe.peak,sample);
+        if(!std::isfinite(sample)||sample>.101f)++probe.violations;
+    }
+    ++probe.blocks;return audio;
+}
+static void stream(obs_source_t* source, int rounds, double hz,bool paced=true) {
     static constexpr uint32_t FRAMES=480;
     std::array<float, FRAMES> l{},r{};
+    const auto release=std::chrono::steady_clock::now();
     uint64_t start=os_gettime_ns();
     for (int k=0;k<rounds;++k) {
         for (unsigned i=0;i<FRAMES;++i) {
@@ -65,7 +81,7 @@ static void stream(obs_source_t* source, int rounds, double hz) {
         audio.samples_per_sec=48000;
         audio.timestamp=start+uint64_t(k)*10000000ULL;
         obs_source_output_audio(source,&audio);
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        if(paced)std::this_thread::sleep_until(release+std::chrono::milliseconds(10*(k+1)));
     }
 }
 int main(int argc,char**argv){
@@ -119,6 +135,32 @@ int main(int argc,char**argv){
         limit[0]>.04&&limit[0]<.101&&std::abs(dry[0]-.282843)<.002&&
         std::abs(reactive[0]-.169706)<.004&&std::abs(fallback[0]-dry[0])<.004&&
         std::abs(comp[1]/comp[0]-.4)<.001&&std::abs(limit[1]/limit[0]-.4)<.001;
+    // Constant full-wet limiter ceiling while the control writer floods
+    // unrelated controls. Every output sample must remain limited.
+    obs_data_set_int(settings,"mode",4);obs_data_set_double(settings,"threshold",-20);
+    obs_data_set_int(settings,"route1_source",0);obs_source_update(filter,settings);
+    stream(source,60,1000,false);
+    obs_source_info monitor{.id="dynamics_peak_probe",.type=OBS_SOURCE_TYPE_FILTER,.output_flags=OBS_SOURCE_AUDIO,
+        .get_name=fixture_name,.create=peak_create,.destroy=fixture_destroy,.filter_audio=peak_inspect};
+    obs_register_source(&monitor);
+    auto* watcher=obs_source_create_private("dynamics_peak_probe","downstream",nullptr);
+    obs_source_filter_add(source,watcher);
+    obs_source_filter_set_order(source,filter,OBS_ORDER_MOVE_TOP);
+    std::atomic<bool> ready{false},stop{false};
+    unsigned updates=0;
+    std::thread writer([&]{
+        while(!stop.load()){
+            obs_data_set_double(settings,"release",updates%2?80:120);
+            obs_source_update(filter,settings);++updates;ready=true;
+        }
+    });
+    while(!ready.load())std::this_thread::yield();
+    stream(source,3000,1000,false);
+    stop=true;writer.join();
+    bool uninterrupted=updates>10&&peak_probe.blocks==3000&&!peak_probe.violations;
+    ok=ok&&uninterrupted;
+    std::printf("DYNAMICS_CONTENTION updates=%u blocks=%u peak=%g violations=%u pass=%d\n",updates,peak_probe.blocks,peak_probe.peak,peak_probe.violations,uninterrupted);
+    obs_source_filter_remove(source,watcher);obs_source_release(watcher);
     std::printf("DYNAMICS_OBS comp=%g exp=%g gate=%g limit=%g dry=%g reactive=%g fallback=%g pass=%d\n",comp[0],exp[0],gate[0],limit[0],dry[0],reactive[0],fallback[0],ok);
     obs_set_output_source(1,nullptr);obs_source_dec_active(source);obs_source_filter_remove(source,filter);
     obs_source_release(filter);obs_source_release(source);obs_data_release(settings);obs_shutdown();return ok?0:1;

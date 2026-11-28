@@ -1,3 +1,4 @@
+#include "history-contention-fixture.hpp"
 #include <obs-module.h>
 #include <util/platform.h>
 #include <array>
@@ -75,5 +76,9 @@ int main(int argc,char** argv){
     s=obs_source_get_settings(graph);obs_data_set_double(s,"graph_control_bass",0);obs_source_update(graph,s);obs_data_release(s);
     auto neutral=stream(80);ok=ok&&std::abs(neutral.onset-baseline.onset)<1e-5;
     std::printf("BAND_TRANSIENT_OBS_PASS=%d onset_ratio=%g tail_ratio=%g high_ratio=%g graph_onset=%g macro_off=%g\n",ok,low.onset/baseline.onset,low.tail/baseline.tail,high.onset/highBase.onset,g.onset,neutral.onset);
-    obs_source_filter_remove(source,graph);obs_source_filter_remove(source,watcher);obs_source_release(graph);obs_source_release(watcher);obs_source_release(source);obs_shutdown();return ok?0:1;
+    obs_source_filter_remove(source,graph);obs_source_filter_remove(source,watcher);obs_source_release(graph);obs_source_release(watcher);auto* history=obs_data_create();
+    obs_data_set_int(history,"mode",2);obs_data_set_double(history,"low_attack_db",12);obs_data_set_double(history,"high_sustain_db",-12);
+    bool continuous=history_contention::verify(source,"hyperdsp_transient_filter",history,"attack_db",0,12);
+    obs_data_release(history);ok=ok&&continuous;
+    obs_source_release(source);obs_shutdown();return ok?0:1;
 }

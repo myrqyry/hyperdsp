@@ -69,12 +69,15 @@ class NativeFilter {
     struct Channel {
         std::array<SvfState,stages_> state{};
         std::array<float,delay_size_> delay{};
-        unsigned pos=0;
+        unsigned pos=0,history=0;
         float comb(float x,float samples,float amount){
             unsigned n=unsigned(samples);
             float t=samples-float(n);
-            float delayed=delay[(pos+delay_size_-n)%delay_size_]*(1-t)+delay[(pos+delay_size_-n-1)%delay_size_]*t;
+            const float a=n<=history?delay[(pos+delay_size_-n)%delay_size_]:0;
+            const float b=n<history?delay[(pos+delay_size_-n-1)%delay_size_]:0;
+            float delayed=a*(1-t)+b*t;
             delay[pos]=x;pos=(pos+1)%delay_size_;
+            if(history<delay_size_-1)++history;
             return (x-amount*delayed)/(1+amount);
         }
     };
@@ -131,7 +134,7 @@ class NativeFilter {
         cached_mode_=FilterMode::Bypass;
     }
     void clear_state(){
-        for(auto& v:voices_){v.state={};v.delay.fill(0);v.pos=0;}
+        for(auto& v:voices_){v.state={};v.pos=v.history=0;}
     }
 public:
     void reset(unsigned rate,FilterSettings s){

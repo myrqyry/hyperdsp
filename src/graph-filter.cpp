@@ -6,18 +6,57 @@
 #include <mutex>
 #include <util/platform.h>
 #include "framework/dsp/graph_monitor.hpp"
+#include "framework/dsp/realtime_handoff.hpp"
 #include <cstring>
 namespace {
 using namespace hyperdsp;
 constexpr const char* empty_graph=R"({"schema":1,"nodes":[],"output":-1})";
-struct Source {
-    std::mutex mutex,control;
-    std::unique_ptr<PreparedGraph> active;
+struct GraphState {
+    std::unique_ptr<PreparedGraph> graph;
     ExternalInputs external;
+    unsigned rate,channels;
+    uint64_t revision;
+};
+struct GraphPacket {
+    std::shared_ptr<GraphState> state;
+    PreparedGraph::ControlValues values;
+};
+struct Source {
+    std::mutex control; // all accepted metadata and transactions; never audio
+    std::shared_ptr<GraphState> accepted_state;
+    PreparedGraph::ControlValues values{};
+    RealtimeHandoff<GraphPacket> handoff;
+    std::atomic<uint64_t> revision{0};
+    uint64_t applied_revision=0; // audio-only
     GraphMonitor monitor;
-    unsigned rate=0,channels=0;
     std::string accepted,error;
     obs_source_t* source=nullptr;
+    // Only immutable graph metadata is inspected by the control thread.
+    Parameters base_values()const{
+        Parameters result;
+        const auto& controls=accepted_state->graph->controls();
+        for(unsigned i=0;i<controls.size();++i)result.emplace(controls[i].id,values[i]);
+        return result;
+    }
+    void accept(std::unique_ptr<PreparedGraph> graph,ExternalInputs external,
+                unsigned rate,unsigned channels,std::string raw,std::string status){
+        auto next=std::make_shared<GraphState>(GraphState{std::move(graph),std::move(external),rate,channels,revision.load()+1});
+        auto packet=std::make_unique<GraphPacket>(GraphPacket{next,next->graph->control_snapshot()});
+        values=packet->values;accepted_state=std::move(next);
+        accepted=std::move(raw);error=std::move(status);
+        revision.store(accepted_state->revision);monitor.invalidate();
+        handoff.publish(std::move(packet));
+    }
+    bool update_controls(const Parameters& updates){
+        auto next=values;
+        error.clear();
+        if(!accepted_state->graph->resolve_values(updates,next,error))return false;
+        if(next!=values){
+            auto packet=std::make_unique<GraphPacket>(GraphPacket{accepted_state,next});
+            values=next;handoff.publish(std::move(packet));
+        }
+        return true;
+    }
 };
 using graph_json::integer;
 using graph_json::keys;
@@ -86,9 +125,9 @@ void save(void* ptr,obs_data_t* settings){
     auto* f=static_cast<Source*>(ptr);if(!f||!settings)return;
     std::string graph;Parameters values;
     {
-        std::lock_guard lock(f->mutex);
-        if(!f->active)return; // preserve an existing recovery record if neither graph could load
-        graph=f->accepted;values=f->active->base_values();
+        std::lock_guard lock(f->control);
+        if(!f->accepted_state)return; // preserve an existing recovery record if neither graph could load
+        graph=f->accepted;values=f->base_values();
     }
     auto* snapshot=obs_data_create();auto* controls=obs_data_create();
     obs_data_set_int(snapshot,"schema",1);obs_data_set_string(snapshot,"graph",graph.c_str());
@@ -102,15 +141,13 @@ void update(void* ptr,obs_data_t* settings){
     obs_audio_info ai{};if(!obs_get_audio_info(&ai))return;
     const unsigned rate=ai.samples_per_sec,channels=get_audio_channels(ai.speakers);
     const std::string raw=obs_data_get_string(settings,"graph_json");
-    bool has_active=false;
-    {
-        std::lock_guard lock(f->mutex);
-        has_active=bool(f->active);
-        if(f->active&&f->accepted==raw&&f->rate==rate&&f->channels==channels){
-            auto values=control_values(settings,f->active->controls());
-            if(!f->active->set_controls(values,f->error))blog(LOG_WARNING,"[HyperDSP Graph] Rejected control values: %s",f->error.c_str());
-            return;
-        }
+    const bool has_active=bool(f->accepted_state);
+    if(has_active&&f->accepted==raw&&f->accepted_state->rate==rate&&f->accepted_state->channels==channels){
+        auto values=control_values(settings,f->accepted_state->graph->controls());
+        try{
+            if(!f->update_controls(values))blog(LOG_WARNING,"[HyperDSP Graph] Rejected control values: %s",f->error.c_str());
+        }catch(const std::exception& e){blog(LOG_WARNING,"[HyperDSP Graph] Control preparation failed: %s",e.what());}
+        return;
     }
     std::string accepted=raw,error;
     auto next=prepare(raw,rate,channels,settings,error);
@@ -126,17 +163,13 @@ void update(void* ptr,obs_data_t* settings){
         else error+="; recovery unavailable: "+recovery_error;
     }
     if(!next.graph){
-        {std::lock_guard lock(f->mutex);f->error=error;}
+        f->error=error;
         blog(LOG_WARNING,"[HyperDSP Graph] Rejected graph: %s",error.c_str());return;
     }
     for(auto& c:next.graph->controls())obs_data_set_default_double(settings,control_key(c).c_str(),c.initial);
-    bool refresh=false;
-    {
-        std::lock_guard lock(f->mutex);
-        refresh=bool(f->active)&&f->accepted!=accepted;
-        f->active.swap(next.graph);std::swap(f->external,next.external);f->monitor.invalidate();
-        f->rate=rate;f->channels=channels;f->accepted=std::move(accepted);f->error=std::move(error);
-    }
+    bool refresh=has_active&&f->accepted!=accepted;
+    try{f->accept(std::move(next.graph),std::move(next.external),rate,channels,std::move(accepted),std::move(error));}
+    catch(const std::exception& e){blog(LOG_WARNING,"[HyperDSP Graph] Publication failed: %s",e.what());return;}
     if(recovered)blog(LOG_WARNING,"[HyperDSP Graph] Recovered last saved accepted graph; draft left unchanged");
     control.unlock();
     if(refresh&&f->source)obs_source_update_properties(f->source);
@@ -163,13 +196,9 @@ void builder_apply(void* ptr,calldata_t* data){
     if(!next.graph->latency_known())status+="; external latency unknown";
     if(!validate_only){
         for(auto& c:next.graph->controls())obs_data_set_default_double(settings,control_key(c).c_str(),c.initial);
+        try{f->accept(std::move(next.graph),std::move(next.external),ai.samples_per_sec,get_audio_channels(ai.speakers),raw,{});}
+        catch(const std::exception& e){calldata_set_string(data,"status",e.what());return;}
         obs_data_set_string(settings,"graph_json",raw.c_str());
-        {
-            std::lock_guard lock(f->mutex);
-            f->active.swap(next.graph);std::swap(f->external,next.external);f->monitor.invalidate();
-            f->rate=ai.samples_per_sec;f->channels=get_audio_channels(ai.speakers);
-            f->accepted=raw;f->error.clear();
-        }
         control.unlock();
         obs_source_update(f->source,settings);
         obs_source_update_properties(f->source);
@@ -212,9 +241,9 @@ bool restore_working_graph(obs_properties_t*,obs_property_t*,void* ptr){
     auto* f=static_cast<Source*>(ptr);if(!f||!f->source)return false;
     std::string graph;Parameters values;
     {
-        std::lock_guard lock(f->mutex);
-        if(!f->active)return false;
-        graph=f->accepted;values=f->active->base_values();
+        std::lock_guard lock(f->control);
+        if(!f->accepted_state)return false;
+        graph=f->accepted;values=f->base_values();
     }
     auto* settings=obs_source_get_settings(f->source);
     if(!settings)return false;
@@ -228,43 +257,60 @@ obs_properties_t* properties(void* p){
     auto* json=obs_properties_add_text(props,"graph_json","Effect graph (schema 1)",OBS_TEXT_MULTILINE);
     std::string status="All native effects, gain and explicitly scanned trusted LADSPA nodes. External latency is unknown. Invalid edits retain the active graph. Scene saves preserve its last accepted definition and base controls for recovery.";
     if(p){
-        auto* f=static_cast<Source*>(p);std::lock_guard lock(f->mutex);
-        if(f->active){
+        auto* f=static_cast<Source*>(p);
+        std::vector<GraphControl> controls;
+        bool has_graph=false,latency_known=false;
+        unsigned latency=0;
+        std::string error;
+        {
+            std::lock_guard lock(f->control);
+            has_graph=bool(f->accepted_state);error=f->error;
+            if(has_graph){
+                const auto& graph=*f->accepted_state->graph;
+                controls=graph.controls();latency=graph.latency();latency_known=graph.latency_known();
+            }
+        }
+        if(has_graph){
             auto* restore=obs_properties_add_button2(props,"restore_working_graph","Restore working graph",restore_working_graph,f);
             obs_property_set_long_description(restore,"Replace the draft and its exposed control values with the currently accepted graph. Does not rebuild an unchanged graph.");
         }
-        if(f->active)for(auto& c:f->active->controls()){
+        for(auto& c:controls){
             auto key=control_key(c);
             auto* slider=obs_properties_add_float_slider(props,key.c_str(),c.name.c_str(),0,1,.01);
             obs_property_set_long_description(slider,"Exposed graph control: mapped to one or more internal parameters. Reactive routes add to this base value. No graph rebuild.");
         }
-        if(!f->error.empty())status+=" Last error: "+f->error;
-        else if(f->active)status+=" Known fixed latency: "+std::to_string(f->active->latency())+" samples."+(f->active->latency_known()?"":" Additional LADSPA latency is unknown and uncompensated.");
+        if(!error.empty())status+=" Last error: "+error;
+        else if(has_graph)status+=" Known fixed latency: "+std::to_string(latency)+" samples."+(latency_known?"":" Additional LADSPA latency is unknown and uncompensated.");
     }
     obs_property_set_long_description(json,status.c_str());return props;
 }
 obs_audio_data* process(void* ptr,obs_audio_data* audio){
     auto* f=static_cast<Source*>(ptr);if(!f||!audio)return audio;
-    std::unique_lock lock(f->mutex,std::try_to_lock);
-    if(!lock.owns_lock()||!f->active){f->monitor.invalidate();return audio;}
+    auto* packet=f->handoff.consume();
     obs_audio_info ai{};
-    if(!obs_get_audio_info(&ai)||ai.samples_per_sec!=f->rate||get_audio_channels(ai.speakers)!=f->channels){f->monitor.invalidate();return audio;}
-    std::array<float*,8> p{};for(unsigned c=0;c<f->channels;++c)p[c]=reinterpret_cast<float*>(audio->data[c]);
-    const float* right=f->channels==2?p[1]:nullptr;
-    bool capture=f->monitor.begin(p[0],audio->frames,f->rate,os_gettime_ns(),right);
-    f->active->external_values(f->external.snapshot());
-    f->active->process(p.data(),f->channels,audio->frames);
-    if(capture){
+    if(!packet||!obs_get_audio_info(&ai)||ai.samples_per_sec!=packet->state->rate||get_audio_channels(ai.speakers)!=packet->state->channels){f->monitor.invalidate();return audio;}
+    const auto& state=*packet->state;
+    auto& graph=*state.graph;
+    if(f->applied_revision!=state.revision){
+        f->applied_revision=state.revision;f->monitor.invalidate();
+    }
+    graph.apply_validated_controls(packet->values);
+    std::array<float*,8> p{};for(unsigned c=0;c<state.channels;++c)p[c]=reinterpret_cast<float*>(audio->data[c]);
+    const float* right=state.channels==2?p[1]:nullptr;
+    bool capture=state.revision==f->revision.load()&&f->monitor.begin(p[0],audio->frames,state.rate,os_gettime_ns(),right);
+    graph.external_values(state.external.snapshot());
+    graph.process(p.data(),state.channels,audio->frames);
+    if(capture&&state.revision==f->revision.load()){
         std::array<GraphMonitorControl,8> controls{};
-        unsigned count=std::min<unsigned>(f->active->controls().size(),8);
+        unsigned count=std::min<unsigned>(graph.controls().size(),8);
         for(unsigned i=0;i<count;++i){
-            auto& id=f->active->controls()[i].id;
+            auto& id=graph.controls()[i].id;
             std::copy_n(id.data(),std::min<size_t>(id.size(),32),controls[i].id.data());
-            auto& name=f->active->controls()[i].name;
+            auto& name=graph.controls()[i].name;
             std::copy_n(name.data(),std::min<size_t>(name.size(),80),controls[i].name.data());
-            controls[i].base=f->active->base_value(i);controls[i].effective=f->active->effective_value(i);
+            controls[i].base=graph.base_value(i);controls[i].effective=graph.effective_value(i);
         }
-        NodeTelemetryArray nodes{};auto node_count=f->active->telemetry(nodes);
+        NodeTelemetryArray nodes{};auto node_count=graph.telemetry(nodes);
         f->monitor.end(p[0],audio->frames,os_gettime_ns(),controls,count,right,nodes,node_count);
     }
     return audio;

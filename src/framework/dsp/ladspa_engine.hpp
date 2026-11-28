@@ -26,7 +26,6 @@ struct LadspaEngine {
         int source=0,port=-1;
         bool mix=false,output=false;
         float min=0,max=0;
-        std::string saved_target;
     };
     std::array<Route,route_count> routes;
     hyperdsp::ModulationMatrix matrix;

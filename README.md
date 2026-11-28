@@ -13,7 +13,7 @@ Standalone deterministic audio effects and DSP hosting for OBS Studio, the audio
 
 Both deterministic effect plugins may optionally consume data published by either Lab plugin without owning inference or requiring its installation. HyperDSP must keep working independently. Future signal consumers should reuse the existing versioned OBS interfaces, read outside the real-time audio callback, and safely handle missing or stale inputs. HyperDSP already consumes optional Sound classification and Sight motion/hand signals via these versioned interfaces.
 
-The first verified target is the microphone coloration filter: dynamic, condenser, ribbon, telephone, vintage radio, tape and dry bypass, with spectral sweep and resonance controls. These are procedural tones, not measured microphone reproductions.
+The first verified target is the microphone coloration filter: dynamic, condenser, ribbon, telephone, vintage radio, tape and dry bypass, with spectral sweep and resonance controls. These are procedural tones, not measured microphone reproductions. Profile stages use fixed-capacity storage and settings are adopted at block boundaries without a processing mutex.
 
 Native Windows x64 and macOS (Intel/Apple Silicon) are now being qualified
 against OBS 32 and 33 in the same shared CI matrix. The native build retains
@@ -22,14 +22,14 @@ for the isolated audition panel remains outstanding. See [CI qualification](docs
 
 ## Build and test (Linux)
 
-Requires a C++20 compiler, CMake, OBS development headers, libobs, Jansson development headers/library, and LADSPA SDK headers (on Mint: libjansson-dev and ladspa-sdk; Clock Sync also uses libsamplerate0-dev). Run `tests/verify.sh` for a fresh Debug build and the configured CTest suite, including numerical DSP checks and real libobs audio capture. Qt widget tests require the Effect Builder dependencies and Qt 6 Test; LADSPA integration and CLI fixture tests require the SDK `amp.so` test plugin and Python 3. No model, download, physical audio device or neural dependency is needed.
+Requires a C++20 compiler, CMake, OBS development headers, libobs, Jansson development headers/library, and LADSPA SDK headers (on Mint: libjansson-dev and ladspa-sdk; Clock Sync also uses libsamplerate0-dev). Run `tests/verify.sh` for a fresh Debug build and the configured CTest suite, including numerical DSP checks and real libobs audio capture. Qt widget tests require the Effect Builder dependencies (Qt 6 Widgets), not a separate Qt Test module; LADSPA integration and CLI fixture tests require the SDK `amp.so` test plugin and Python 3. No model, download, physical audio device or neural dependency is needed.
 
 On a headless Linux host with Xvfb available, run `xvfb-run -a tests/verify.sh` to provide a display for libobs.
 
 ### Shared CI packages
 
 [Shared OBS plugin CI](.github/workflows/ci.yml) targets Linux x86-64
-with pinned OBS 32.2.0 and 33.0.3 SDKs. All 56 configured tests, including
+with pinned OBS 32.2.0 and 33.0.3 SDKs. All 59 configured tests, including
 Qt Effect Builder, Clock Sync, real libobs audio and LADSPA discovery,
 are required. The versioned packages contain the plugin, all 11 graph
 presets, licensing and the installed effect-library/scanner tools.
@@ -38,7 +38,7 @@ OBS32 uses `bin/64bit/hyperdsp.so`; OBS33 uses `hyperdsp.so` at the
 plugin root. For local CMake installs, choose
 `-DHYPERDSP_PACKAGE_LAYOUT=legacy` (default) or `modern` for the
 matching target SDK. Do not install two versions together.
-Windows/macOS portability work has begun, but native builds are not yet qualified. See [CI qualification](docs/ci.md).
+Windows/macOS portability work has begun, but native builds are not yet qualified on this branch. See [CI qualification](docs/ci.md). For opt-in Linux callback timing and allocator audit, see [real-time profiling](docs/realtime-profiling.md).
 
 ## Clock Sync
 
@@ -58,7 +58,7 @@ Drag node bodies to arrange the canvas, and drag an output port to an input port
 
 **HyperDSP Graph** is an initial executable serial/parallel effect graph filter. Its versioned JSON definition is editable in OBS filter properties; the graphical Effect Builder is available through the optional Qt dock. The graph supports all 43 native processing modes across twelve families, and a gain/weighted-sum utility. Scanned compatible LADSPA effects can also be used as graph nodes or standalone filters. External native code is trusted code, not sandboxed.
 
-The graph has a single audio input (source index -1), up to 16 nodes and 32 weighted edges, and a selected output. It rejects cycles, disconnected nodes, unsupported effects, non-finite/out-of-range parameters and invalid connections. Parallel paths are aligned to the greatest fixed algorithmic latency at each merge, including Color oversampling and Spectral FFT buffering. Valid graphs are prepared off the audio callback and swapped in; an invalid edit retains the previous active graph; OBS saves its last accepted definition and base control values for recovery on reload. The callback processes bounded chunks with preallocated buffers. A valid replacement resets graph state, and an update collision can briefly bypass; there is no crossfade or scene-wide timestamp alignment.
+The graph has a single audio input (source index -1), up to 16 nodes and 32 weighted edges, and a selected output. It rejects cycles, disconnected nodes, unsupported effects, non-finite/out-of-range parameters and invalid connections. Parallel paths are aligned to the greatest fixed algorithmic latency at each merge, including Color oversampling and Spectral FFT buffering. Valid graphs are prepared off the audio callback and swapped in; an invalid edit retains the previous active graph; OBS saves its last accepted definition and base control values for recovery on reload. The callback processes bounded chunks with preallocated buffers. A valid replacement resets graph state; same-graph control edits preserve state without a processing mutex; there is no crossfade or scene-wide timestamp alignment.
 
 Example: parallel saturated and dry branches. Paste the JSON into the graph filter's properties:
 

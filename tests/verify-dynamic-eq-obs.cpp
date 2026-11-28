@@ -1,3 +1,4 @@
+#include "history-contention-fixture.hpp"
 #include <obs-module.h>
 #include <util/platform.h>
 #include <array>
@@ -62,5 +63,9 @@ int main(int argc,char** argv){
     s=obs_source_get_settings(graph);obs_data_set_double(s,"graph_control_depth",0);obs_source_update(graph,s);obs_data_release(s);
     double neutral=stream(6500,.5);ok=ok&&std::abs(neutral)<.02;
     std::printf("DYNAMIC_EQ_OBS_PASS=%d cut=%g quiet=%g low=%g boost=%g bypass=%g graph=%g macro_off=%g\n",ok,cut,quiet,low,boost,bypass,graphCut,neutral);
-    obs_source_filter_remove(source,graph);obs_source_filter_remove(source,watcher);obs_source_release(graph);obs_source_release(watcher);obs_source_release(source);obs_shutdown();return ok?0:1;
+    obs_source_filter_remove(source,graph);obs_source_filter_remove(source,watcher);obs_source_release(graph);obs_source_release(watcher);auto* history=obs_data_create();
+    obs_data_set_int(history,"mode",1);obs_data_set_double(history,"threshold",-40);obs_data_set_double(history,"range_db",-12);
+    bool continuous=history_contention::verify(source,"hyperdsp_dynamic_eq_filter",history,"unused_test_control",0,1);
+    obs_data_release(history);ok=ok&&continuous;
+    obs_source_release(source);obs_shutdown();return ok?0:1;
 }

@@ -16,6 +16,7 @@ effect-builder
 effect-library
 effect-mix
 filter-analysis
+fft
 formant
 formant-obs
 graph-audition
@@ -42,6 +43,8 @@ native-filter
 native-obs
 portable-discovery
 reactive-source
+realtime-handoff
+realtime-snapshot
 scan-process
 space
 space-obs

@@ -3,6 +3,7 @@
 #include "graph_monitor.hpp"
 #include "fft.hpp"
 #include <numbers>
+#include <memory>
 namespace hyperdsp {
 struct PreviewPoint {double hz,db;};
 struct GraphPreview {
@@ -64,7 +65,10 @@ inline GraphPreview preview_graph(const std::string& raw,unsigned rate,unsigned 
             graph.reset();graph=PreparedGraph::prepare(spec,rate,channels,result.error);
             if(!graph)return result;
             constexpr unsigned n=32768;
-            std::array<std::complex<float>,n> impulse{};
+            // This isolated worker may have a small platform thread stack.
+            // Keep the long IR and its large FFT table off that stack.
+            auto impulse_storage=std::make_unique<std::array<std::complex<float>,n>>();
+            auto& impulse=*impulse_storage;
             double energy=0,tail=0;
             for(unsigned offset=0;offset<n;offset+=block){
                 for(unsigned c=0;c<channels;++c){buffer[c].fill(0);if(offset==0)buffer[c][0]=1;}
@@ -75,7 +79,7 @@ inline GraphPreview preview_graph(const std::string& raw,unsigned rate,unsigned 
                 }
             }
             result.tail_warning=energy>0&&tail/energy>1e-8;
-            FFT<n> fft;fft.transform(impulse);
+            auto fft=std::make_unique<FFT<n>>();fft->transform(impulse);
             const double high=std::min(20000.,rate*.49);
             for(unsigned i=0;i<=256;++i){
                 double f=20*std::pow(high/20,i/256.);

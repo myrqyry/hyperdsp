@@ -1,40 +1,55 @@
 #include <obs-module.h>
 #include <util/platform.h>
 #include "framework/dsp/clock_sync.hpp"
+#include "framework/dsp/realtime_handoff.hpp"
 #include <atomic>
 #include <cstdio>
 #include <mutex>
 namespace {
 using hyperdsp::ClockSync;
-struct Source {
-    std::mutex mutex;
-    std::unique_ptr<ClockSync> engine;
-    std::atomic<bool> interrupted{false};
+struct Configuration {
     unsigned rate=0,channels=0,quality=1;
     double limit=1000;
     bool arrival=false;
+    bool operator==(const Configuration&)const=default;
+};
+struct Prepared {
+    Configuration config;
+    uint64_t generation=0;
+    ClockSync engine;
+};
+struct Source {
+    std::mutex control; // writers only
+    Configuration accepted;
+    hyperdsp::RealtimeHandoff<Prepared> handoff;
+    std::atomic<uint64_t> requested{0};
+    std::atomic<bool> interrupted{false};
     obs_audio_data output{};
-    // Atomic snapshot for UI/consumer reads: no diagnostic reader ever
-    // takes the processing mutex. Writers already serialize under it.
-    std::atomic<uint64_t> sequence{0},relocks{0},last_packet{0};
+    // The audio thread is the only diagnostics writer. A pending generation
+    // reports acquiring until the next packet adopts the prepared engine.
+    std::atomic<uint64_t> sequence{0},generation{0},relocks{0},last_packet{0};
     std::atomic<double> drift{0},correction{0},error{0};
     std::atomic<unsigned> flags{0};
     static_assert(std::atomic<double>::is_always_lock_free);
     static_assert(std::atomic<uint64_t>::is_always_lock_free);
-    void publish(){
-        auto d=engine->diagnostics();
+    void publish(const Prepared& state,uint64_t stamp){
+        auto d=state.engine.diagnostics();
         sequence.fetch_add(1);
         drift.store(d.drift_ppm);correction.store(d.correction_ppm);error.store(d.error_ms);
         relocks.store(d.relocks);flags.store(1u|(d.locked?2u:0u)|(d.limited?4u:0u));
+        generation.store(state.generation);last_packet.store(stamp);
         sequence.fetch_add(1);
     }
     bool snapshot(ClockSync::Diagnostics& d)const{
         for(int i=0;i<3;++i){
             auto a=sequence.load();if(a&1)continue;
             auto flag=flags.load();
+            auto applied=generation.load(),stamp=last_packet.load();
             d={drift.load(),correction.load(),error.load(),relocks.load(),bool(flag&2),bool(flag&4)};
             if(sequence.load()==a){
-                auto stamp=last_packet.load(),now=os_gettime_ns();
+                auto desired=requested.load();
+                if(desired!=applied){d={};return desired!=0;}
+                auto now=os_gettime_ns();
                 if(!stamp||now<stamp||now-stamp>1000000000ULL)d.locked=false;
                 return bool(flag&1)&&!interrupted.load();
             }
@@ -56,16 +71,17 @@ void update(void* ptr,obs_data_t* s){
     double limit=obs_data_get_double(s,"limit_ppm");
     limit=std::isfinite(limit)?std::clamp(limit,50.,2000.):1000.;
     bool arrival=obs_data_get_int(s,"clock")==1;
-    {
-        std::lock_guard lock(f->mutex);
-        if(f->engine&&f->rate==rate&&f->channels==channels&&f->quality==quality&&f->limit==limit&&f->arrival==arrival)return;
-    }
+    const Configuration config{rate,channels,quality,limit,arrival};
+    std::lock_guard lock(f->control);
+    if(f->requested.load()&&f->accepted==config)return;
     try{
-        auto next=std::make_unique<ClockSync>();
-        if(!next->prepare(rate,channels,quality,limit))return;
-        std::lock_guard lock(f->mutex);
-        f->engine.swap(next);f->rate=rate;f->channels=channels;
-        f->quality=quality;f->limit=limit;f->arrival=arrival;f->last_packet=0;f->publish();
+        auto next=std::make_unique<Prepared>();
+        next->config=config;
+        if(!next->engine.prepare(rate,channels,quality,limit))return;
+        next->generation=f->requested.load()+1;
+        f->accepted=config;
+        f->requested.store(next->generation);
+        f->handoff.publish(std::move(next));
     }catch(const std::exception& e){blog(LOG_WARNING,"[HyperDSP Clock Sync] Preparation failed: %s",e.what());}
 }
 void status(void* ptr,calldata_t* data){
@@ -109,27 +125,28 @@ obs_properties_t* properties(void* ptr){
 }
 obs_audio_data* process(void* ptr,obs_audio_data* audio){
     auto* f=static_cast<Source*>(ptr);if(!f||!audio||!audio->frames)return audio;
-    std::unique_lock lock(f->mutex,std::try_to_lock);
-    if(!lock.owns_lock()){f->interrupted=true;return audio;}
+    // OBS serializes callbacks for this source and consumes returned buffers
+    // before the next callback. Retire previous state only at that boundary.
+    auto* state=f->handoff.consume();
     obs_audio_info ai{};
-    if(!f->engine||!obs_get_audio_info(&ai)||ai.samples_per_sec!=f->rate||get_audio_channels(ai.speakers)!=f->channels){
+    if(!state||!obs_get_audio_info(&ai)||ai.samples_per_sec!=state->config.rate||get_audio_channels(ai.speakers)!=state->config.channels){
         f->interrupted=true;return audio;
     }
-    if(f->interrupted.exchange(false))f->engine->reset();
+    const auto& config=state->config;
+    if(f->interrupted.exchange(false))state->engine.reset();
     std::array<const float*,8> buffers{};
-    for(unsigned c=0;c<f->channels;++c)buffers[c]=reinterpret_cast<const float*>(audio->data[c]);
+    for(unsigned c=0;c<config.channels;++c)buffers[c]=reinterpret_cast<const float*>(audio->data[c]);
     uint64_t timestamp=audio->timestamp;
-    if(f->arrival){
-        auto now=os_gettime_ns();auto duration=uint64_t(audio->frames)*1000000000ULL/f->rate;
+    if(config.arrival){
+        auto now=os_gettime_ns();auto duration=uint64_t(audio->frames)*1000000000ULL/config.rate;
         timestamp=now>duration?now-duration:0;
     }
-    auto out=f->engine->process(buffers.data(),audio->frames,timestamp);
-    f->last_packet.store(out.valid?os_gettime_ns():0);
-    f->publish();
+    auto out=state->engine.process(buffers.data(),audio->frames,timestamp);
+    f->publish(*state,out.valid?os_gettime_ns():0);
     if(!out.valid)return audio;
     if(!out.frames)return nullptr; // sinc priming can buffer a complete short packet
     f->output=*audio;f->output.frames=out.frames;f->output.timestamp=out.timestamp;
-    for(unsigned c=0;c<f->channels;++c)f->output.data[c]=reinterpret_cast<uint8_t*>(const_cast<float*>(out.data[c]));
+    for(unsigned c=0;c<config.channels;++c)f->output.data[c]=reinterpret_cast<uint8_t*>(const_cast<float*>(out.data[c]));
     return &f->output;
 }
 }

@@ -4,15 +4,13 @@
 #include <obs-module.h>
 #include "framework/dsp/dynamics.hpp"
 #include "framework/obs/route_properties.hpp"
-#include <memory>
-#include <mutex>
+#include "framework/obs/realtime_settings.hpp"
 namespace {
 using namespace hyperdsp;
 struct Source {
-    std::mutex mutex;
-    Dynamics engine;FilterTelemetry telemetry;bool active=false;
-    ExternalInputs external;
-    unsigned rate=0,channels=0;
+    RealtimeSettings<DynamicsSettings> parameters;
+    Dynamics engine;FilterTelemetry telemetry;
+    unsigned rate=0,channels=0;uint64_t generation=0;
 };
 DynamicsSettings read(obs_data_t* s){
     DynamicsSettings f;
@@ -30,13 +28,9 @@ void defaults(obs_data_t* s){
 void update(void* ptr,obs_data_t* s){
     auto* f=static_cast<Source*>(ptr);if(!f)return;
     auto settings=read(s);obs_audio_info ai{};if(!obs_get_audio_info(&ai))return;
-    std::lock_guard lock(f->mutex);f->telemetry.invalidate();
-    f->active=settings.mode!=DynamicsMode::Bypass;
-    for(unsigned i=0;i<modulation_slots;++i)obs_routes::connect(f->external,s,i,settings.routes[i].source);
     auto channels=get_audio_channels(ai.speakers);
-    if(f->rate!=ai.samples_per_sec||f->channels!=channels){
-        f->rate=ai.samples_per_sec;f->channels=channels;f->engine.reset(f->rate,settings);
-    }else f->engine.set(settings);
+    try{f->parameters.publish(settings,s,ai.samples_per_sec,channels);f->telemetry.invalidate();}
+    catch(const std::exception& e){blog(LOG_WARNING,"[HyperDSP Dynamics] Settings preparation failed: %s",e.what());}
 }
 void* create(obs_data_t* s,obs_source_t* source){auto f=std::make_unique<Source>();f->telemetry.attach(source);update(f.get(),s);return f.release();}
 void destroy(void* p){delete static_cast<Source*>(p);}
@@ -72,13 +66,24 @@ obs_properties_t* properties(void* ptr){
 }
 obs_audio_data* process(void* p,obs_audio_data* audio){
     auto* f=static_cast<Source*>(p);if(!f||!audio)return audio;
-    std::unique_lock lock(f->mutex,std::try_to_lock);if(!lock.owns_lock()){f->telemetry.invalidate();return audio;}
-    obs_audio_info ai{};if(!obs_get_audio_info(&ai)||ai.samples_per_sec!=f->rate||
-        f->rate<8000||f->rate>192000||get_audio_channels(ai.speakers)!=f->channels||f->channels>MAX_AUDIO_CHANNELS){f->telemetry.invalidate();return audio;}
+    auto* state=f->parameters.consume();
+    obs_audio_info ai{};
+    if(!state||!obs_get_audio_info(&ai)||ai.samples_per_sec!=state->rate||
+        state->rate<8000||state->rate>192000||get_audio_channels(ai.speakers)!=state->channels||state->channels>MAX_AUDIO_CHANNELS){
+        f->telemetry.invalidate();return audio;
+    }
+    if(state->generation!=f->generation){
+        if(f->rate!=state->rate||f->channels!=state->channels){
+            f->rate=state->rate;f->channels=state->channels;f->engine.reset(f->rate,state->settings);
+        }else f->engine.set(state->settings);
+        f->generation=state->generation;f->telemetry.invalidate();
+    }
+    const auto epoch=f->telemetry.epoch();
     std::array<float*,MAX_AUDIO_CHANNELS> buffers{};
     for(unsigned c=0;c<f->channels;++c)buffers[c]=reinterpret_cast<float*>(audio->data[c]);
-    f->engine.external_values(f->external.snapshot());f->engine.process(buffers.data(),f->channels,audio->frames);
-    if(f->active&&audio->frames)f->telemetry.publish(f->rate,[&]{return dynamics_telemetry(f->engine);});
+    f->engine.external_values(state->external.snapshot());f->engine.process(buffers.data(),f->channels,audio->frames);
+    if(state->settings.mode!=DynamicsMode::Bypass&&audio->frames&&state->generation==f->parameters.latest_generation())
+        f->telemetry.publish(f->rate,[&]{return dynamics_telemetry(f->engine);},epoch);
     return audio;
 }
 }
