@@ -376,8 +376,9 @@ int main(int argc,char**argv) {
     auto* history=obs_data_create();
     obs_data_set_string(history,"library",argv[3]);obs_data_set_string(history,"label","amp_stereo");obs_data_set_double(history,"port_0",.25);
     // The SDK mono and stereo amplifiers have the same gain contract.
+    // Deliberately throttle structural edits to expose scheduling-sensitive fixtures.
     bool continuous=history_contention::verify(source,"hyperdsp_ladspa_filter",history,"lfo_rate",1,2);
-    bool replacement=history_contention::verify(source,"hyperdsp_ladspa_filter",history,"lfo_rate",1,2,"amp_mono");
+    bool replacement=history_contention::verify(source,"hyperdsp_ladspa_filter",history,"lfo_rate",1,2,"amp_mono",25);
     obs_data_release(history);pass=pass&&continuous&&replacement;
     obs_source_release(source);obs_data_release(settings);obs_shutdown();
     return pass?0:1;

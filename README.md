@@ -15,7 +15,7 @@ Both deterministic effect plugins may optionally consume data published by eithe
 
 The first verified target is the microphone coloration filter: dynamic, condenser, ribbon, telephone, vintage radio, tape and dry bypass, with spectral sweep and resonance controls. These are procedural tones, not measured microphone reproductions. Profile stages use fixed-capacity storage and settings are adopted at block boundaries without a processing mutex.
 
-Native Linux x86-64, Windows x64 and macOS (Intel/Apple Silicon) passed the full shared CI matrix against OBS 32.2.0 and 33.0.3 at the final PR #2 head, including the 59-case regression suite and package checks. Post-merge Apple Silicon test repeatability remains under investigation (see [CI qualification](docs/ci.md)). The native build retains
+Native Linux x86-64, Windows x64 and macOS (Intel/Apple Silicon) passed the full shared CI matrix against OBS 32.2.0 and 33.0.3 at the final PR #2 head, including the 59-case regression suite and package checks. Post-merge Apple Silicon repeatability failures have locally verified fixture corrections awaiting native requalification (see [CI qualification](docs/ci.md)). The native build retains
 LADSPA hosting, Clock Sync and the Qt Effect Builder; Windows/macOS native device playback
 for the isolated audition panel remains outstanding. See [CI qualification](docs/ci.md).
 

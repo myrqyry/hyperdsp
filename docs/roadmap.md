@@ -89,7 +89,7 @@ Standalone conventional audio effects and hosting for OBS, with optional inputs 
 
 - Bounded control-to-audio ownership handoff across all 15 filter adapters; audio-owned DSP state, constant-time delay resets, preserved ordinary-edit histories and lock-free telemetry snapshots. Clock Sync output lifetime verified with downstream capture and sanitizers.
 - Stage-contiguous FFT optimization, all-adapter Linux allocation/timing audit, cold and structural transitions, multi-rate/channel and simultaneous-source tests; isolated actual OBS three-track mixer verification. See [profiling evidence](realtime-profiling.md).
-- Full shared CI qualification across Linux, Windows and both macOS architectures for OBS 32.2.0/33.0.3: 59 required tests and verified packages on each of eight legs at the final PR #2 head. Post-merge Apple Silicon test repeatability remains open. Native Windows/macOS audition playback is not included.
+- Full shared CI qualification across Linux, Windows and both macOS architectures for OBS 32.2.0/33.0.3: 59 required tests and verified packages on each of eight legs at the final PR #2 head. Post-merge Apple Silicon repeatability failures have locally verified fixture corrections; native rerun remains open. Native Windows/macOS audition playback is not included.
 
 ## Next layers
 

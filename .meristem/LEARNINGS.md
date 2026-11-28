@@ -104,3 +104,18 @@ Kilo's CMake JOIN delimiter warning is incorrect: independently configured a min
 ## 2026-11-27 — Merged build and documentation reconciliation
 
 Final PR head 2b7dafe passed all eight native matrix legs (run 46088111680); merged at 5a09e5c. Post-merge main run 46089690710 exposed repeatability failures on Apple Silicon: OBS32 Color fixture fallback RMS .321089 versus dry .282843; OBS33 LADSPA history contention zero errors but zero property reads (14 updates). Both 58/59; cause unresolved, no assertion relaxation. Linux merged Release 59/59 in 38.81s, exact inventory verified; staged 20-file legacy package passed dependency resolution, catalog, scanner, CLI, three-track mixer (187 blocks, 191488 frames/track, zero errors). Installed package matches staging byte-for-byte and isolated installed-module catalog smoke passed. Previous installation retained outside the plugin directory; existing desktop OBS left running. Documentation reconciles old mutex descriptions, platform qualification, scanner layout and benchmark scope without rewriting historical results. Native audible audition, physical output, live producer validation and extreme scheduling remain open.
+
+## 2026-11-27 — Repeatability, not weaker DSP assertions
+
+Main run 46089690710 finished 6/8. Reproduced both Apple Silicon failure
+conditions locally: Color with 350 ms delayed Sound procedure, old
+200 ms settling gave RMS .586232 vs .282843; LADSPA with 25 ms writer
+spacing gave one edit, zero property reads, zero errors/480000 samples.
+Color now respects the documented 500 ms freshness window plus a
+separate ramp warmup. History/latency fixtures use bounded control
+progress checkpoints between audio segments, including a full
+16-update metadata-read interval before the last quarter. Retain
+the delayed/throttled regression conditions; targeted tests pass with
+fallback .282843 and 25 structural edits, 1 metadata read, no errors.
+Full 59/59 CTest in 39.16 s, exact inventory. No production changes or
+test reductions; native qualification pending.

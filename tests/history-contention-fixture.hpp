@@ -2,6 +2,7 @@
 #include "latency-contention-fixture.hpp"
 #include <vector>
 #include <string>
+#include <chrono>
 
 namespace history_contention {
 struct Probe {
@@ -30,7 +31,7 @@ inline obs_audio_data* inspect(void* ptr,obs_audio_data* a){
 // Compare two freshly constructed real OBS filters: identical audio, identical
 // active controls, but one receives concurrent changes to a mode-inactive control.
 // The input alternates signal/silence to exercise state and effect tails.
-inline bool verify(obs_source_t* source,const char* id,obs_data_t* settings,const char* key,double a,double b,const char* replacement_label=nullptr){
+inline bool verify(obs_source_t* source,const char* id,obs_data_t* settings,const char* key,double a,double b,const char* replacement_label=nullptr, unsigned writer_pause_ms=0){
     constexpr unsigned blocks=1000,frames=480;
     Probe probe;probe.reference.reserve(blocks*frames);active=&probe;
     obs_source_info info{.id="hyperdsp_history_test_probe",.type=OBS_SOURCE_TYPE_FILTER,.output_flags=OBS_SOURCE_AUDIO,
@@ -49,25 +50,33 @@ inline bool verify(obs_source_t* source,const char* id,obs_data_t* settings,cons
         if(!filter)return false;
         obs_source_filter_add(source,filter);obs_source_filter_set_order(source,filter,OBS_ORDER_MOVE_TOP);
         probe.compare=concurrent;probe.samples=0;
-        std::atomic<bool> ready{false},stop{false};std::thread writer;
+        std::atomic<bool> stop{false};std::atomic<unsigned> completed{0};std::thread writer;
+        bool progress=true;
         if(concurrent){
             writer=std::thread([&]{
                 while(!stop.load()){
                     obs_data_set_double(settings,key,updates%2?a:b);
                     if(replacement_label)obs_data_set_string(settings,"label",updates%2?initial_label.c_str():replacement_label);
-                    obs_source_update(filter,settings);++updates;ready=true;
+                    obs_source_update(filter,settings);++updates;
                     if(replacement_label&&updates%16==0){
                         auto* props=obs_source_properties(filter);
                         metadata_ok=metadata_ok&&props&&obs_properties_get(props,"port_0");
                         if(props)obs_properties_destroy(props);
                         ++property_reads;
                     }
+                    completed.store(updates,std::memory_order_release);
+                    if(writer_pause_ms)std::this_thread::sleep_for(std::chrono::milliseconds(writer_pause_ms));
                 }
             });
-            while(!ready.load())std::this_thread::yield();
+            progress=latency_contention::wait_for_updates(completed,1);
         }
         std::array<float,frames> l{},r{};auto start=os_gettime_ns();
-        for(unsigned k=0;k<blocks;++k){
+        for(unsigned k=0;progress&&k<blocks;++k){
+            if(concurrent&&k&&k%(blocks/4)==0){
+                const unsigned target=completed.load()+((replacement_label&&k==3*blocks/4)?16:4);
+                progress=latency_contention::wait_for_updates(completed,target);
+                if(!progress)break;
+            }
             for(unsigned j=0;j<frames;++j){
                 l[j]=k%40<10?latency_contention::sample(uint64_t(k)*frames+j):0;r[j]=-.4f*l[j];
             }
@@ -77,7 +86,7 @@ inline bool verify(obs_source_t* source,const char* id,obs_data_t* settings,cons
         }
         stop=true;if(writer.joinable())writer.join();
         obs_source_filter_remove(source,filter);obs_source_release(filter);
-        return probe.samples==uint64_t(blocks)*frames;
+        return progress&&probe.samples==uint64_t(blocks)*frames;
     };
     bool ok=run(false)&&run(true)&&probe.reference.size()==uint64_t(blocks)*frames&&probe.energy>1&&updates>10&&!probe.errors&&metadata_ok&&(!replacement_label||property_reads>0);
     obs_source_filter_remove(source,watcher);obs_source_release(watcher);active=nullptr;

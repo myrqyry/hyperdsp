@@ -224,3 +224,29 @@ already does. The same limited-stack test now passes, preserving all
 numerical and reset assertions. Full local portable dependency
 regression: 59/59 passed in 38.80 seconds, exact JUnit inventory
 verified. Windows-specific DLL staging and load preflight await CI.
+
+## Post-merge repeatability corrections
+
+Main run 46089690710 finished with six platform legs passing and two
+Apple Silicon failures. Color measured fallback before the external
+snapshot's documented 500 ms validity window elapsed; LADSPA's unpaced
+history fixture completed only 14 updates, before its first property
+read at update 16. These conditions were reproduced with the production
+module on Linux: a 350 ms delayed Sound read caused fallback RMS
+0.586232 (expected 0.282843), and 25 ms spacing of LADSPA structural
+updates caused one update and no property reads despite zero waveform
+errors over 480000 samples.
+
+The Color fixture retains the delayed producer and advances paced
+audio through expiry and ramp settling before its unchanged capture
+window. Shared history and latency fixtures require bounded control
+progress between source segments, including an entire property-read
+interval before the final quarter when metadata checks are enabled.
+The writer remains active during audio submission; waits occur only
+in the test driver, never inside an audio callback. The LADSPA
+replacement fixture retains its deliberate writer throttle. No
+production DSP, sample counts, tolerances, CTest timeout or inventory
+changed. Focused Linux rerun: Color fallback 0.282843; LADSPA 25
+structural edits, one metadata read, zero errors. Full Linux suite
+59/59 in 39.16 seconds, exact JUnit inventory verified. Native rerun
+is needed to establish repeatability on the previously failing host.

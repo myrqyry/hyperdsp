@@ -16,7 +16,7 @@ Standalone deterministic audio effects and DSP plugin host for OBS. HyperDSP is 
 
 ## Current qualification (2026-11-27)
 
-The merged real-time refactor removes HyperDSP processing mutexes from all 15 adapters using bounded ownership handoff; telemetry is bounded and nonblocking for audio. Ordinary edits preserve state, structural replacement can reset it. [Profiling](../docs/realtime-profiling.md) records measured Linux callback allocation/timing and isolated mixer evidence. All eight hosted [CI targets](../docs/ci.md) passed 59 required cases and package verification at the final PR #2 head. Post-merge Apple Silicon Color fallback and LADSPA contention fixture failures remain under investigation. This does not establish physical audio, live producer, extreme scheduling or native audition playback qualification. Historical milestones below are preserved as evidence, not current status.
+The merged real-time refactor removes HyperDSP processing mutexes from all 15 adapters using bounded ownership handoff; telemetry is bounded and nonblocking for audio. Ordinary edits preserve state, structural replacement can reset it. [Profiling](../docs/realtime-profiling.md) records measured Linux callback allocation/timing and isolated mixer evidence. All eight hosted [CI targets](../docs/ci.md) passed 59 required cases and package verification at the final PR #2 head. Post-merge Apple Silicon Color fallback and LADSPA contention fixture failures have locally verified fixture corrections; native repeatability still awaits confirmation. This does not establish physical audio, live producer, extreme scheduling or native audition playback qualification. Historical milestones below are preserved as evidence, not current status.
 
 ## Open structural uncertainty
 

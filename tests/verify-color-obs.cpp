@@ -89,8 +89,8 @@ int main(int argc,char**argv){
     if(props)obs_properties_destroy(props);
     obs_source_filter_add(source,filter);obs_set_output_source(1,source);
     obs_source_set_audio_mixers(source,1);obs_source_inc_active(source);obs_source_set_audio_active(source,true);
-    auto measure=[&](){
-        stream(source,20,1000);
+    auto measure=[&](unsigned warmup=20){
+        stream(source,warmup,1000);
         Stats stats;obs_source_add_audio_capture_callback(source,capture,&stats);
         stream(source,40,1000);obs_source_remove_audio_capture_callback(source,capture,&stats);
         return std::array<double,2>{std::sqrt(stats.sum_l.load()/std::max<uint64_t>(1,stats.samples.load())),std::sqrt(stats.sum_r.load()/std::max<uint64_t>(1,stats.samples.load()))};
@@ -110,8 +110,17 @@ int main(int argc,char**argv){
     obs_data_set_double(settings,"route1_amount",24);
     obs_data_set_string(settings,"route1_sound_channel",channel.c_str());
     obs_data_set_string(settings,"route1_sound_category","Speech");obs_source_update(filter,settings);
-    auto reactive=measure();
-    sound_fixture::available=false;auto fallback=measure();
+    // Allow the 100 ms asynchronous poll to establish a live signal.
+    auto reactive=measure(60);
+    // Exercise fallback when the worker cannot promptly complete its next read.
+    sound_fixture::delay_ms=350;
+    sound_fixture::available=false;
+    // Expire the last valid 500 ms snapshot even if the worker is delayed,
+    // then advance the 10 ms ramps with a separate paced warmup. The
+    // original 40-packet measurement and amplitude assertions are unchanged.
+    stream(source,60,1000);
+    auto fallback=measure();
+    sound_fixture::delay_ms=0;
     obs_source_filter_remove(source,producer);obs_source_release(producer);
     bool ok=controls&&clip[0]>.9&&clip[1]>.8&&os[0]>.85&&os[0]<1.05&&
         std::abs(dry[0]-.282843)<.003&&std::abs(dry[1]-.113137)<.003&&
