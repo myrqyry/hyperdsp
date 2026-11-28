@@ -63,10 +63,13 @@ def stage(root, installed, stage_root, target, version):
     env = runtime_env(work, target, version)
     if target == 'windows-x64':
         manifest = build / 'runtime-dlls-RelWithDebInfo.txt'
-        linked = [Path(line) for line in manifest.read_text().splitlines() if line.strip()]
+        try:
+            linked = [Path(line) for line in manifest.read_text().splitlines() if line.strip()]
+        except FileNotFoundError as exc:
+            raise ValueError(f'Missing CMake runtime DLL manifest: {manifest}') from exc
         module_dir = build / 'RelWithDebInfo'
         if not linked:
-            raise ValueError('No linked runtime DLLs reported by CMake')
+            raise ValueError(f'No linked runtime DLLs reported by CMake: {manifest}')
         for dll in linked:
             staged = module_dir / dll.name
             if not staged.is_file() or sdk.digest(staged) != sdk.digest(dll):
